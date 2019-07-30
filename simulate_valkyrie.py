@@ -1,12 +1,11 @@
 #!/usr/bin/env python2
 
 from pydrake.all import *
-from helpers import RPYValkyrieFixedPointState
+from helpers import RPYValkyrieFixedPointState, RPYValkyrieFixedPointTorque
+from controllers import ValkyrieController
 import numpy as np
 
-# Load a model from a urdf file
-
-#robot_description_file = "drake/manipulation/models/jaco_description/urdf/j2n6s300.urdf"
+# Load the model from a urdf file
 robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_A_sim_drake_one_neck_dof_wide_ankle_rom.urdf"
 robot_urdf = FindResourceOrThrow(robot_description_file)
 tree = RigidBodyTree(robot_urdf, FloatingBaseType.kRollPitchYaw)
@@ -43,12 +42,17 @@ print(Ad_qd.shape)
 # Simulation setup
 builder = DiagramBuilder()
 lc = DrakeLcm()
-vis = DrakeVisualizer(tree, lc)
 robot = builder.AddSystem(RigidBodyPlant(tree))
-publisher = builder.AddSystem(vis)
-builder.Connect(robot.get_output_port(0), publisher.get_input_port(0))
-force = builder.AddSystem(ConstantVectorSource(np.zeros(tree.get_num_actuators())))
-builder.Connect(force.get_output_port(0), robot.get_input_port(0))
+visualizer_publisher = builder.AddSystem(DrakeVisualizer(tree,lc))
+builder.Connect(robot.get_output_port(0), visualizer_publisher.get_input_port(0))
+
+# Apply constant torques to the joints
+#tau_vec = np.zeros(tree.get_num_actuators())
+#force = builder.AddSystem(ConstantVectorSource(tau_vec))
+#builder.Connect(force.get_output_port(0), robot.get_input_port(0))
+controller = builder.AddSystem(ValkyrieController())
+builder.Connect(controller.get_output_port(0), robot.get_input_port(0))
+builder.Connect(robot.get_output_port(0),controller.get_input_port(0))
 
 diagram = builder.Build()
 simulator = Simulator(diagram)
@@ -65,5 +69,6 @@ state.SetFromVector(initial_state_vec)
 integrator = RungeKutta2Integrator(diagram, 1e-3, context)
 simulator.reset_integrator(integrator)
 
+# Run the simulation
 simulator.Initialize()
 simulator.AdvanceTo(1.0)
