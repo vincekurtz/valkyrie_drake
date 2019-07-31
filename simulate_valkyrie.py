@@ -33,8 +33,8 @@ robot.RegisterVisualGeometry(
         np.array([0.5,0.5,0.5,0.0]))    # Color set to be completely transparent
 
 # Turn off gravity (for testing)
-g = robot.mutable_gravity_field()
-g.set_gravity_vector([0,0,0])
+#g = robot.mutable_gravity_field()
+#g.set_gravity_vector([0,0,0])
 
 robot.Finalize()
 assert robot.geometry_source_is_registered()
@@ -48,7 +48,7 @@ builder.Connect(
         scene_graph.get_source_pose_port(robot.get_source_id()))
 
 # Set up a controller
-controller = builder.AddSystem(ValkyrieController())
+controller = builder.AddSystem(ValkyrieController(robot))
 builder.Connect(
         robot.get_state_output_port(),
         controller.get_input_port(0))
@@ -67,7 +67,7 @@ robot_context = diagram.GetMutableSubsystemContext(robot, diagram_context)
 
 # Simulator setup
 simulator = Simulator(diagram, diagram_context)
-simulator.set_target_realtime_rate(0.2)
+simulator.set_target_realtime_rate(1.0)
 simulator.set_publish_every_time_step(False)
 
 # Set initial state

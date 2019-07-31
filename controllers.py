@@ -5,17 +5,21 @@
 ##
 
 import numpy as np
-from pydrake.all import VectorSystem
-from helpers import RPYValkyrieFixedPointTorque, RPYValkyrieFixedPointState
+from pydrake.all import *
+from helpers import *
 
 class ValkyrieController(VectorSystem):
     """
     PD Controller that attempts to regulate the robot to a fixed initial position
     """
-    def __init__(self, input_size=73, output_size=30):
+    def __init__(self, robot):
+
+
         VectorSystem.__init__(self, 
-                              input_size,   # input size [q,qd]
-                              output_size)   # output size [tau]
+                              robot.num_positions()+robot.num_velocities(),   # input is [q,v]
+                              robot.num_actuators())                          # output is [tau]
+        
+        self.robot = robot
 
         # PD parameters copied from drake/examples/valkyrie/valkyrie_pd_ff_controller.cc
         Kp_vec = np.asarray([0, 0, 0, 0, 0, 0])                       # base
@@ -43,22 +47,18 @@ class ValkyrieController(VectorSystem):
         self.Kd = np.diag(Kd_vec)
 
         # Nominal state
-        self.nominal_state = RPYValkyrieFixedPointState()
+        self.nominal_state = ValkyrieFixedPointState()
 
     def DoCalcVectorOutput(self, context, state, unused, output):
         """
         Map from the state (q,qd) to output torques.
         """
 
-        #q = state[:36]
-        #qd = state[36:]
+        q = state[0:self.robot.num_positions()]
+        v = state[self.robot.num_positions():]
 
-        #q_nom = self.nominal_state[:36]
-        #qd_nom = self.nominal_state[36:]
+        M, Cv, tauG, B, tauExt = ManipulatorDynamics(self.robot, q, v)
 
-        #tau_ff = RPYValkyrieFixedPointTorque()
-        #tau_pd = np.matmul(self.Kp,(q_nom-q)) + np.matmul(self.Kd, (qd_nom-q))
+        print(B)
 
-        #output[:] = tau_ff + tau_pd[6:]
         output[:] = 0
-
