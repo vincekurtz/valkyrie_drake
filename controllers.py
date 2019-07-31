@@ -12,10 +12,10 @@ class ValkyrieController(VectorSystem):
     """
     PD Controller that attempts to regulate the robot to a fixed initial position
     """
-    def __init__(self):
+    def __init__(self, input_size=73, output_size=30):
         VectorSystem.__init__(self, 
-                              72,   # input size [q,qd] is 36*2=72
-                              30)   # output size [tau] is 30
+                              input_size,   # input size [q,qd]
+                              output_size)   # output size [tau]
 
         # PD parameters copied from drake/examples/valkyrie/valkyrie_pd_ff_controller.cc
         Kp_vec = np.asarray([0, 0, 0, 0, 0, 0])                       # base
@@ -50,14 +50,15 @@ class ValkyrieController(VectorSystem):
         Map from the state (q,qd) to output torques.
         """
 
-        q = state[:36]
-        qd = state[36:]
+        #q = state[:36]
+        #qd = state[36:]
 
-        q_nom = self.nominal_state[:36]
-        qd_nom = self.nominal_state[36:]
+        #q_nom = self.nominal_state[:36]
+        #qd_nom = self.nominal_state[36:]
 
-        tau_ff = RPYValkyrieFixedPointTorque()
-        tau_pd = np.matmul(self.Kp,(q_nom-q)) + np.matmul(self.Kd, (qd_nom-q))
+        #tau_ff = RPYValkyrieFixedPointTorque()
+        #tau_pd = np.matmul(self.Kp,(q_nom-q)) + np.matmul(self.Kd, (qd_nom-q))
 
-        output[:] = tau_ff + tau_pd[6:]
+        #output[:] = tau_ff + tau_pd[6:]
+        output[:] = 0
 

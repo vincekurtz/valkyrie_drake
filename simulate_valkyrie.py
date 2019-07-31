@@ -30,7 +30,11 @@ robot.RegisterVisualGeometry(
         X_BG,
         HalfSpace(),
         "ground_visual",
-        np.array([0.5,0.5,0.5,0.7]))    # Color
+        np.array([0.5,0.5,0.5,0.0]))    # Color set to be completely transparent
+
+# Turn off gravity (for testing)
+g = robot.mutable_gravity_field()
+g.set_gravity_vector([0,0,0])
 
 robot.Finalize()
 assert robot.geometry_source_is_registered()
@@ -43,24 +47,27 @@ builder.Connect(
         robot.get_geometry_poses_output_port(),
         scene_graph.get_source_pose_port(robot.get_source_id()))
 
-# Connect the visualizer
+# Set up a controller
+controller = builder.AddSystem(ValkyrieController())
+builder.Connect(
+        robot.get_state_output_port(),
+        controller.get_input_port(0))
+builder.Connect(
+        controller.get_output_port(0),
+        robot.get_actuation_input_port(robot.GetModelInstanceByName('valkyrie')))
+
+# Set up the Visualizer
 ConnectDrakeVisualizer(builder=builder, scene_graph=scene_graph)
+ConnectContactResultsToDrakeVisualizer(builder, robot)
+
+# Compile the diagram: no adding control blocks from here on out
 diagram = builder.Build()
-
-
 diagram_context = diagram.CreateDefaultContext()
 robot_context = diagram.GetMutableSubsystemContext(robot, diagram_context)
 
-# Send fixed commands of zero to the joints
-zero_cmd = np.zeros(robot.num_actuators())
-robot_context.FixInputPort(
-        robot.get_actuation_input_port().get_index(), 
-        np.zeros(30)+0.5)
-
-
 # Simulator setup
 simulator = Simulator(diagram, diagram_context)
-simulator.set_target_realtime_rate(1.0)
+simulator.set_target_realtime_rate(0.2)
 simulator.set_publish_every_time_step(False)
 
 # Set initial state
