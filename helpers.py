@@ -36,6 +36,51 @@ def ManipulatorDynamics(plant, q, v=None):
     return (M, Cv, tauG, B, tauExt)
 
 
+def QP_example():
+    """
+    Example of using Drake to solve a quadratic program
+
+        min   1/2x'Qx + c'x
+        s.t.  Ax <= b
+    """
+    # Cost and constraint parameters
+    Q = np.matrix([[1, -1],     # we need to use matrices and the '*' operator for
+                  [-1, 2]])     # matrix multiplication so that we can multiply these mp.Variable objects,
+    c = np.matrix([[-2],[-6]])  # which are numpy arrays with dtype=object, which np.matmul doesn't support.
+
+    A = np.matrix([[1,  1],
+                  [-1, 2],
+                  [2,  1]])
+
+    b = np.matrix([[2],[2],[3]])
+
+    # Set up the problem
+    mp = MathematicalProgram()
+    x = mp.NewContinuousVariables(2,"x")
+    x = x[np.newaxis].T         # formulate as proper (vertical) vector
+
+    # Add the cost
+    mp.AddQuadraticCost(Q,c,x)
+
+    # Add constraints elementwise, since numpy arrays don't seem to play well with 
+    # drake's (in)equality constraints
+    Ax = np.asarray(A*x)
+    b = np.asarray(b)
+    for i in range(b.shape[0]):
+        Ax_i = Ax[i,0]
+        mp.AddLinearConstraint(Ax[i,0] <= b[i])
+  
+    # Get the solution
+    result = Solve(mp)
+    print("Result: x = %s" % result.GetSolution(x))
+    print("")
+    print("Used solver [%s]" % result.get_solver_id().name())
+    print("Run time %s s" % result.get_solver_details().run_time)
+
+    return result
+
+
+
 def list_joints_and_actuators(robot):
     """
     Run through all the joints and actuators in the robot model 
@@ -174,3 +219,5 @@ def RPYValkyrieFixedPointState():
 
     return np.hstack((q,qd))
 
+if __name__=="__main__":
+    QP_example()  #TESTING
