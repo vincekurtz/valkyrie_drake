@@ -12,45 +12,15 @@ tree = RigidBodyTree(robot_urdf, FloatingBaseType.kRollPitchYaw)
 
 AddFlatTerrainToWorld(tree, 100, 10)  # add some flat terrain to walk on
 
-# See some model parameters
-print(tree.get_num_positions())
-print(tree.get_num_velocities())
-print(tree.get_num_actuators())
-print(tree.get_num_bodies())
-print("")
-
-# Get equations of motion for given q, qd
-q = np.zeros(tree.get_num_positions())
-qd = np.zeros(tree.get_num_velocities())
-cache = tree.doKinematics(q,qd)
-
-bodies = [tree.get_body(j) for j in range(tree.get_num_bodies())]
-no_wrench = { body : np.zeros(6) for body in bodies}
-
-C = tree.dynamicsBiasTerm(cache, no_wrench)  # correolis and centripedal terms
-H = tree.massMatrix(cache)                   # mass matrix
-
-print(C.shape)
-print(H.shape)
-
-# Centroidal momentum quantities
-A = tree.centroidalMomentumMatrix(cache)
-Ad_qd = tree.centroidalMomentumMatrixDotTimesV(cache)
-print(A.shape)
-print(Ad_qd.shape)
-
 # Simulation setup
 builder = DiagramBuilder()
 lc = DrakeLcm()
 robot = builder.AddSystem(RigidBodyPlant(tree))
-visualizer_publisher = builder.AddSystem(DrakeVisualizer(tree,lc))
-builder.Connect(robot.get_output_port(0), visualizer_publisher.get_input_port(0))
+visualizer = builder.AddSystem(DrakeVisualizer(tree,lc))
+builder.Connect(robot.get_output_port(0), visualizer.get_input_port(0))
 
-# Apply constant torques to the joints
-#tau_vec = np.zeros(tree.get_num_actuators())
-#force = builder.AddSystem(ConstantVectorSource(tau_vec))
-#builder.Connect(force.get_output_port(0), robot.get_input_port(0))
-controller = builder.AddSystem(ValkyrieController())
+# Connect the controller
+controller = builder.AddSystem(ValkyrieController(tree))
 builder.Connect(controller.get_output_port(0), robot.get_input_port(0))
 builder.Connect(robot.get_output_port(0),controller.get_input_port(0))
 
@@ -71,4 +41,4 @@ simulator.reset_integrator(integrator)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(1.0)
+simulator.AdvanceTo(3.0)
