@@ -41,4 +41,4 @@ simulator.reset_integrator(integrator)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(1.0)
+simulator.AdvanceTo(2.0)

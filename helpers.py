@@ -42,3 +42,37 @@ def RPYValkyrieFixedPointTorque():
       52.24348208, 0.2418569007])
 
     return tau
+
+def ComTrajectory(time):
+    """
+    Return a desired center of mass position and velocity for the given timestep.
+    """
+
+    # for now we'll consider this trajectory to be a straight line connecting 
+    # two points
+
+    t_switch = 1.0
+    if time <= t_switch:
+        x_com =  [0.0, (0.1/t_switch)*time, 1.0]
+        xd_com = [0.0, 0.1/t_switch, 0.0]
+    else:
+        x_com = [0.0, 0.1, 1.0]
+        xd_com = [0.0, 0.0, 0.0]
+
+    return (x_com, xd_com)
+
+def FootTrajectory(time):
+    """
+    Return a desired position and velocity for the right foot at the given
+    timestep.
+    """
+    t_switch = 1.0
+    if time <= t_switch:
+        x_foot = [-0.075,-0.153,0.0827]
+        xd_foot = [0.0, 0.0, 0.0]
+    else:
+        x_foot = [-0.075+0.5*(time-t_switch),-0.153,0.0827]
+        xd_foot = [0.5, 0.0, 0.0]
+
+    return (x_foot, xd_foot)
+
