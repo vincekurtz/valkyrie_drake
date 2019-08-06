@@ -5,7 +5,7 @@
 ##
 
 import numpy as np
-from pydrake.all import VectorSystem
+from pydrake.all import *
 from helpers import RPYValkyrieFixedPointTorque, RPYValkyrieFixedPointState
 
 class ValkyrieController(VectorSystem):
@@ -24,6 +24,21 @@ class ValkyrieController(VectorSystem):
         # Nominal state
         self.nominal_state = RPYValkyrieFixedPointState()
 
+    def get_foot_contact_points(self):
+        """
+        Return a tuple of points in the foot frame that represent contact locations. 
+        (this is a rough guess based on self.tree.getTerrainContactPoints)
+        """
+        corner_contacts = (
+                            [-0.069, 0.08, 0.0],
+                            [-0.069,-0.08, 0.0],
+                            [ 0.201,-0.08, 0.0],
+                            [ 0.201, 0.08, 0.0]
+                          )
+
+        return corner_contacts
+        
+
     def DoCalcVectorOutput(self, context, state, unused, output):
         """
         Map from the state (q,qd) to output torques.
@@ -38,6 +53,32 @@ class ValkyrieController(VectorSystem):
         tauG = -self.tree.dynamicsBiasTerm(cache, {}, False)
         Cv = self.tree.dynamicsBiasTerm(cache, {}, True) + tauG
         B = self.tree.B
+
+        right_foot = self.tree.FindBody('rightFoot')
+        left_foot = self.tree.FindBody('leftFoot')
+
+        # Get the position of each foot
+        world_body_index = self.tree.world().get_body_index()
+        left_foot_index = left_foot.get_body_index()
+        left_foot_in_world_frame = self.tree.transformPoints(cache,      # kinematics cache
+                                                            [0,0,0],     # point relative the foot frame
+                                                            left_foot_index,  # foot frame index
+                                                            world_body_index) # world frame index
+
+        left_foot_jacobian = self.tree.transformPointsJacobian(cache,
+                                                                [0,0,0],
+                                                                left_foot_index,
+                                                                world_body_index,
+                                                                False)
+
+
+        collisions = self.tree.ComputeMaximumDepthCollisionPoints(cache)
+
+        terrain_contacts = self.tree.getTerrainContactPoints(right_foot)
+
+        for i in range(terrain_contacts.shape[1]):
+            print(repr(terrain_contacts[:,i]))
+        print("")
 
         # Get centroidal momentum quantities
         A = self.tree.centroidalMomentumMatrix(cache)
