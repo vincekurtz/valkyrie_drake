@@ -73,16 +73,20 @@ class ValkyrieController(VectorSystem):
 
         return contact_jacobians
 
-    def solve_QP(self, cache, contact_jacobians, xdd_com_des):
+    def solve_QP(self, cache, contact_jacobians, xdd_com_des, qdd_des):
         """
         Solve a quadratic program which attempts to regulate the joints to the desired
-        accelerations, qdd_des, as follows:
+        accelerations and center of mass to the desired position as follows:
 
-            min  \| Jcom*qdd + Jcomd*qd - xdd_com_des \|^2
+            min   w_1*| Jcom*qdd + Jcomd*qd - xdd_com_des |^2 + w_2*| qdd_des - qdd |^2
             s.t.  H*qdd + C = B*tau + sum(J'*f)
                   f \in friction cones
         """
         mp = MathematicalProgram()
+
+        # Set weightings for prioritized task-space control
+        w1 = 1.0   # center-of-mass tracking
+        w2 = 0.5   # joint tracking
 
         # Get dynamic quantities
         H = self.tree.massMatrix(cache)
@@ -100,16 +104,24 @@ class ValkyrieController(VectorSystem):
         for i in range(len(contact_jacobians)):        # contact forces
             f_contact[i] = mp.NewContinuousVariables(3, 'f_%s'%i)
 
-        # Define the cost function
+        # Center of mass tracking cost
         xdd_com_des = xdd_com_des[np.newaxis].T    # cast as vectors for numpy
         qdd = qdd[np.newaxis].T
-        I = np.matrix(np.eye(self.nv))
-        err = np.dot(Jcom,qdd) + Jcomd_qd - xdd_com_des
+        x_com_err = np.dot(Jcom,qdd) + Jcomd_qd - xdd_com_des
 
-        cost = np.dot(err.T,err)    # this is a 1x1 np.ndarray and we need a pydrake.symbolic.Expression
-        cost = cost[0,0]            # to use as a cost, so we simply extract the first element.
+        x_com_cost = np.dot(x_com_err.T,x_com_err)    # this is a 1x1 np.ndarray and we need a pydrake.symbolic.Expression
+        x_com_cost = x_com_cost[0,0]                  # to use as a cost, so we simply extract the first element.
 
-        mp.AddQuadraticCost(cost)
+        mp.AddQuadraticCost(w1*x_com_cost)
+       
+        # Joint tracking cost
+        qdd_des = qdd_des[np.newaxis].T
+        q_err = qdd - qdd_des
+        q_cost = np.dot(q_err.T,q_err)
+        q_cost = q_cost[0,0]
+
+        mp.AddQuadraticCost(w2*q_cost)
+        
 
         # Dynamic constraints 
         C = C[np.newaxis].T         # cast as vectors for numpy multiplication
@@ -160,13 +172,15 @@ class ValkyrieController(VectorSystem):
         # Compute desired center of mass acceleration
         x_com = self.tree.centerOfMass(cache)
         xd_com = np.dot(self.tree.centerOfMassJacobian(cache), qd)
-        x_com_nom = np.asarray([ 0.0, 0.0, 0.96 ])
+        x_com_nom = np.asarray([ 0.0, 0.0, 1.04 ])
         xd_com_nom = np.asarray([ 0.0, 0.0, 0.0 ])
+
+        print(x_com)
 
         xdd_com_des = 100*(x_com_nom-x_com) + 10*(xd_com_nom-xd_com)
 
         # Solve QP to get desired torques
-        tau_qp = self.solve_QP(cache, contact_jacobians, xdd_com_des)
+        tau_qp = self.solve_QP(cache, contact_jacobians, xdd_com_des, qdd_des)
 
         output[:] = tau_qp
         
