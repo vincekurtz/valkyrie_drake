@@ -23,6 +23,8 @@ class ValkyrieController(VectorSystem):
         self.nv = tree.get_num_velocities()
         self.nu = tree.get_num_actuators()
 
+        self.mu = 0.3  # assumed friction coefficient
+
         # Nominal state
         self.nominal_state = RPYValkyrieFixedPointState()
 
@@ -71,16 +73,24 @@ class ValkyrieController(VectorSystem):
 
         return contact_jacobians
 
-    def solve_QP(self, H, C, B, contact_jacobians, qdd_des):
+    def solve_QP(self, cache, contact_jacobians, xdd_com_des):
         """
         Solve a quadratic program which attempts to regulate the joints to the desired
         accelerations, qdd_des, as follows:
 
-            min  \| qdd - qdd_des \|^2
+            min  \| Jcom*qdd + Jcomd*qd - xdd_com_des \|^2
             s.t.  H*qdd + C = B*tau + sum(J'*f)
                   f \in friction cones
         """
         mp = MathematicalProgram()
+
+        # Get dynamic quantities
+        H = self.tree.massMatrix(cache)
+        C = self.tree.dynamicsBiasTerm(cache, {}, True)
+        B = self.tree.B
+
+        Jcom = self.tree.centerOfMassJacobian(cache)
+        Jcomd_qd = self.tree.centerOfMassJacobianDotTimesV(cache)[np.newaxis].T
 
         # create optimization variables
         qdd = mp.NewContinuousVariables(self.nv, 'qdd')   # joint accelerations
@@ -91,12 +101,13 @@ class ValkyrieController(VectorSystem):
             f_contact[i] = mp.NewContinuousVariables(3, 'f_%s'%i)
 
         # Define the cost function
-        qdd_des = qdd_des[np.newaxis].T    # cast as vectors for numpy
+        xdd_com_des = xdd_com_des[np.newaxis].T    # cast as vectors for numpy
         qdd = qdd[np.newaxis].T
         I = np.matrix(np.eye(self.nv))
+        err = np.dot(Jcom,qdd) + Jcomd_qd - xdd_com_des
 
-        cost = (qdd_des.T-qdd.T)*I*(qdd_des-qdd)    # this is a 1x1 np.matrix and we need a pydrake.symbolic.Expression
-        cost = cost[0,0]                            # to use as a cost, so we simply extract the first element.
+        cost = np.dot(err.T,err)    # this is a 1x1 np.ndarray and we need a pydrake.symbolic.Expression
+        cost = cost[0,0]            # to use as a cost, so we simply extract the first element.
 
         mp.AddQuadraticCost(cost)
 
@@ -111,9 +122,12 @@ class ValkyrieController(VectorSystem):
         for i in range(self.nv):
             mp.AddLinearConstraint(lhs[i,0] == rhs[i,0])
 
-        # Friction cone constraints 
+        # Friction cone (really pyramid) constraints 
         for j in range(len(contact_jacobians)):
-            mp.AddLinearConstraint(f_contact[j][2] >= 0)   # positive z contact force
+            mp.AddConstraint(f_contact[j][0] + f_contact[j][1] <= self.mu*f_contact[j][2])
+            mp.AddConstraint(-f_contact[j][0] + f_contact[j][1] <= self.mu*f_contact[j][2])
+            mp.AddConstraint(f_contact[j][0] - f_contact[j][1] <= self.mu*f_contact[j][2])
+            mp.AddConstraint(-f_contact[j][0] - f_contact[j][1] <= self.mu*f_contact[j][2])
        
         # Solve the QP
         result = Solve(mp)
@@ -131,28 +145,28 @@ class ValkyrieController(VectorSystem):
         q = state[:self.np]
         qd = state[self.np:]
 
-        q_nom = self.nominal_state[:self.np]
-        qd_nom = self.nominal_state[self.np:]
-
-        # Get equations of motion
-        #
-        #  H(q)*qdd + C(q,qd) = B*tau + f_ext
-        #
+        # Run kinematics, which will allow us to calculate the dynamics
         cache = self.tree.doKinematics(q,qd)
-        H = self.tree.massMatrix(cache)
-        C = self.tree.dynamicsBiasTerm(cache, {}, True)
-        B = self.tree.B
 
         # Compute contact jacobians
         contact_jacobians = self.get_contact_jacobians(cache)
 
-        # Get centroidal momentum quantities
-        A = self.tree.centroidalMomentumMatrix(cache)
-        Ad_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
+        # Compute desired joint acclerations
+        q_nom = self.nominal_state[:self.np]
+        qd_nom = self.nominal_state[self.np:]
+
+        qdd_des = 100*(q_nom-q) + 1*(qd_nom-qd)
+
+        # Compute desired center of mass acceleration
+        x_com = self.tree.centerOfMass(cache)
+        xd_com = np.dot(self.tree.centerOfMassJacobian(cache), qd)
+        x_com_nom = np.asarray([ 0.0, 0.0, 0.96 ])
+        xd_com_nom = np.asarray([ 0.0, 0.0, 0.0 ])
+
+        xdd_com_des = 100*(x_com_nom-x_com) + 10*(xd_com_nom-xd_com)
 
         # Solve QP to get desired torques
-        qdd_des = 100*(q_nom-q) + 1*(qd_nom-qd)
-        tau_qp = self.solve_QP(H, C, B, contact_jacobians, qdd_des)
+        tau_qp = self.solve_QP(cache, contact_jacobians, xdd_com_des)
 
         output[:] = tau_qp
         
