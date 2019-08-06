@@ -15,7 +15,7 @@ AddFlatTerrainToWorld(tree, 100, 10)  # add some flat terrain to walk on
 # Simulation setup
 builder = DiagramBuilder()
 lc = DrakeLcm()
-robot = builder.AddSystem(RigidBodyPlant(tree))
+robot = builder.AddSystem(RigidBodyPlant(tree,timestep=0))
 visualizer = builder.AddSystem(DrakeVisualizer(tree,lc))
 builder.Connect(robot.get_output_port(0), visualizer.get_input_port(0))
 
@@ -36,9 +36,9 @@ initial_state_vec = RPYValkyrieFixedPointState()  # computes [q,qd] for a reason
 state.SetFromVector(initial_state_vec)
 
 # Use a different integrator to speed up simulation (default is RK3)
-integrator = RungeKutta2Integrator(diagram, 1e-3, context)
+integrator = RungeKutta2Integrator(diagram, 2e-3, context)
 simulator.reset_integrator(integrator)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(3.0)
+simulator.AdvanceTo(1.0)
