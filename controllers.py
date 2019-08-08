@@ -7,6 +7,7 @@
 import numpy as np
 import time
 from pydrake.all import *
+from casadi import *
 from helpers import *
 
 class ValkyrieController(VectorSystem):
@@ -24,6 +25,9 @@ class ValkyrieController(VectorSystem):
         self.nu = tree.get_num_actuators()
 
         self.mu = 0.3  # assumed friction coefficient
+
+        self.last_iteration_solution = None
+        self.last_iteration_duals = None
 
         # Nominal state
         self.nominal_state = RPYValkyrieFixedPointState()
@@ -167,6 +171,82 @@ class ValkyrieController(VectorSystem):
         assert result.is_success(), "Whole-body QP Solver Failed!"
 
         return result.GetSolution(tau)
+    
+    def solve_QP_casadi(self, cache, contact_jacobians, J_foot, Jd_qd_foot, xdd_foot_des, xdd_com_des, qdd_des):
+        """
+        Solve a quadratic program which attempts to regulate the joints to the desired
+        accelerations and center of mass to the desired position as follows:
+
+            min   w_1*| J_com*qdd + J_comd*qd - xdd_com_des |^2 + w_2*| qdd_des - qdd |^2
+            s.t.  H*qdd + C = B*tau + sum(J'*f)
+                  f \in friction cones
+                  J*qdd + Jd*qd == 0  for all contacts
+        """
+        opti = casadi.Opti()
+        num_contacts = len(contact_jacobians)
+
+        # Set weightings for prioritized task-space control
+        w1 = 1.0   # center-of-mass tracking
+        w2 = 0.1   # joint tracking
+        w3 = 1.5   # foot tracking
+
+        # Get dynamic quantities
+        H = self.tree.massMatrix(cache)
+        C = self.tree.dynamicsBiasTerm(cache, {}, True)
+        B = self.tree.B
+
+        J_com = self.tree.centerOfMassJacobian(cache)
+        Jd_qd_com = self.tree.centerOfMassJacobianDotTimesV(cache)
+
+        # create optimization variables
+        qdd = opti.variable(self.nv)    # joint accelerations
+        tau = opti.variable(self.nu)    # applied torques
+       
+        f_contact = {}
+        for i in range(num_contacts):        # contact forces
+            f_contact[i] = opti.variable(3)
+
+        # Center of mass tracking cost
+        x_com_err = mtimes(J_com,qdd) + Jd_qd_com - xdd_com_des
+        x_com_cost = w1*dot(x_com_err, x_com_err)
+       
+        # Joint tracking cost
+        q_err = qdd - qdd_des
+        q_cost = w2*dot(q_err,q_err)
+
+        # Foot tracking cost
+        x_foot_err = mtimes(J_foot,qdd) + Jd_qd_foot - xdd_foot_des
+        x_foot_cost = w3*dot(x_foot_err,x_foot_err)
+
+        opti.minimize(x_com_cost + q_cost + x_foot_cost)
+       
+        # Dynamic constraints 
+        f_ext = sum([mtimes(contact_jacobians[i].T, f_contact[i]) for i in range(num_contacts)])
+        
+        opti.subject_to( mtimes(H,qdd) + C == mtimes(B,tau) + f_ext )
+
+        # Friction cone (really pyramid) constraints 
+        for j in range(num_contacts):
+            opti.subject_to(f_contact[j][0] + f_contact[j][1] <= self.mu*f_contact[j][2])
+            opti.subject_to(-f_contact[j][0] + f_contact[j][1] <= self.mu*f_contact[j][2])
+            opti.subject_to(f_contact[j][0] - f_contact[j][1] <= self.mu*f_contact[j][2])
+            opti.subject_to(-f_contact[j][0] - f_contact[j][1] <= self.mu*f_contact[j][2])
+
+        # Warm-start if possible
+        if self.last_iteration_solution is not None:
+            opti.set_initial(self.last_iteration_solution)
+            opti.set_initial(opti.lam_g, self.last_iteration_duals)
+
+        # Solve the QP
+        options = {"ipopt.print_level":0, "print_time": 0}  # supress solver output
+        opti.solver('ipopt',options)
+        sol = opti.solve()
+
+        # Save optimal values for next iteration
+        self.last_iteration_solution = sol.value_variables()
+        self.last_iteration_duals = sol.value(opti.lam_g)
+
+        return sol.value(tau)
 
 
     def DoCalcVectorOutput(self, context, state, unused, output):
@@ -208,12 +288,10 @@ class ValkyrieController(VectorSystem):
         
         xdd_foot_des = 100*(x_foot_nom-x_foot) + 1*(xd_foot_nom-xd_foot)
 
-        print(x_foot_nom)
-
+        start_time = time.time()
         # Solve QP to get desired torques
         tau_qp = self.solve_QP(cache, contact_jacobians, J_foot, Jd_qd_foot, xdd_foot_des, xdd_com_des, qdd_des)
-        
-        print(x_com)
+        print(time.time()-start_time)
 
         output[:] = tau_qp
         
