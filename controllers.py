@@ -7,30 +7,78 @@
 import numpy as np
 import time
 from pydrake.all import *
-from casadi import *
 from helpers import *
 
-class ValkyrieController(VectorSystem):
+class ZeroInputController(VectorSystem):
     """
-    PD Controller that attempts to regulate the robot to a fixed initial position
+    The most simple possible controller, one that simply outputs zeros as the control.
     """
     def __init__(self, tree):
         VectorSystem.__init__(self, 
                               tree.get_num_positions() + tree.get_num_velocities(),   # input size [q,qd]
                               tree.get_num_actuators())   # output size [tau]
+    def DoCalcVectorOutput(self, context, state, unused, output):
+        output[:] = 0
 
-        self.tree = tree
+class ValkyriePDController(VectorSystem):
+    """
+    A simple PD controller that regulates the robot to a nominal (standing) position.
+    """
+    def __init__(self, tree, Kp=1000, Kd=1):
+        VectorSystem.__init__(self, 
+                              tree.get_num_positions() + tree.get_num_velocities(),   # input size [q,qd]
+                              tree.get_num_actuators())   # output size [tau]
+
         self.np = tree.get_num_positions()
         self.nv = tree.get_num_velocities()
         self.nu = tree.get_num_actuators()
 
-        self.mu = 0.3  # assumed friction coefficient
-
-        self.last_iteration_solution = None
-        self.last_iteration_duals = None
-
-        # Nominal state
         self.nominal_state = RPYValkyrieFixedPointState()
+        self.tau_ff = RPYValkyrieFixedPointTorque()
+
+        self.tree = tree   # rigid body tree describing this robot
+
+        self.Kp = Kp
+        self.Kd = Kd
+
+    def StateToQV(self, state):
+        """
+        Given a full state vector [q, v], extract q and v.
+        """
+        q = state[:self.tree.get_num_positions()]
+        v = state[self.tree.get_num_positions():]
+
+        return (q,v)
+
+    def ComputePDControl(self,q,qd,feedforward=True):
+        """
+        Map state [q,qd] to control inputs [u].
+        """
+        q_nom, qd_nom = self.StateToQV(self.nominal_state)
+
+        # compute torques to be applied in joint space
+        if feedforward:
+            tau = self.tau_ff + self.Kp*(q_nom-q) + self.Kd*(qd_nom - qd)
+        else:
+            tau = self.Kp*(q_nom-q) + self.Kd*(qd_nom - qd)
+
+        # Convert torques to actuator space
+        B = self.tree.B
+        u = np.matmul(B.T,tau)
+
+        return u
+
+    def DoCalcVectorOutput(self, context, state, unused, output):
+        q,qd = self.StateToQV(state)
+        output[:] = self.ComputePDControl(q,qd,feedforward=True)
+        
+
+class ValkyrieController(ValkyriePDController):
+    def __init__(self, tree):
+        ValkyriePDController.__init__(self, 
+                                      tree)
+
+        self.mu = 0.3   # friction coefficient
 
     def get_foot_contact_points(self):
         """
@@ -48,8 +96,8 @@ class ValkyrieController(VectorSystem):
 
     def get_contact_jacobians(self, cache, support="double"):
         """
-        Return a list of contact jacobians for both feet, assuming double support and that
-        each foot has contacts in the corners, as defined by self.get_foot_contact_points()
+        Return a list of contact jacobians for the given support phase (double, right, or left). 
+        Assumes that each foot has corner contacts as defined by self.get_foot_contact_points().
         """
         world_index = self.tree.world().get_body_index()
         right_foot_index = self.tree.FindBody('rightFoot').get_body_index()
@@ -70,7 +118,7 @@ class ValkyrieController(VectorSystem):
                                                       contact_point,     # point in foot frame
                                                       foot_index,        # foot frame index
                                                       world_index,       # world frame index
-                                                      False)             # in terms of qd
+                                                      False)             # in terms of qd as opposed to v
                                                                       
                 contact_jacobians.append(J)
 
@@ -167,95 +215,22 @@ class ValkyrieController(VectorSystem):
         # Solve the QP
         result = Solve(mp)
 
-        assert result.is_success(), "Whole-body QP Solver Failed!"
+        if result.is_success():
+            return result.GetSolution(tau)
+        else:
+            print("Whole-body QP Solver Failed! Falling back to PD controller")
+            return self.ComputePDControl(q,qd,feedforward=True)
 
-        return result.GetSolution(tau)
     
-    def solve_QP_casadi(self, cache, contact_jacobians, J_foot, Jd_qd_foot, xdd_foot_des, xdd_com_des, qdd_des):
-        """
-        Solve a quadratic program which attempts to regulate the joints to the desired
-        accelerations and center of mass to the desired position as follows:
-            min   w_1*| J_com*qdd + J_comd*qd - xdd_com_des |^2 + w_2*| qdd_des - qdd |^2
-            s.t.  H*qdd + C = B*tau + sum(J'*f)
-                  f \in friction cones
-                  J*qdd + Jd*qd == 0  for all contacts
-        """
-        opti = casadi.Opti()
-        num_contacts = len(contact_jacobians)
-
-        # Set weightings for prioritized task-space control
-        w1 = 1.0   # center-of-mass tracking
-        w2 = 0.1   # joint tracking
-        w3 = 1.5   # foot tracking
-
-        # Get dynamic quantities
-        H = self.tree.massMatrix(cache)
-        C = self.tree.dynamicsBiasTerm(cache, {}, True)
-        B = self.tree.B
-
-        J_com = self.tree.centerOfMassJacobian(cache)
-        Jd_qd_com = self.tree.centerOfMassJacobianDotTimesV(cache)
-
-        # create optimization variables
-        qdd = opti.variable(self.nv)    # joint accelerations
-        tau = opti.variable(self.nu)    # applied torques
-       
-        f_contact = {}
-        for i in range(num_contacts):        # contact forces
-            f_contact[i] = opti.variable(3)
-
-        # Center of mass tracking cost
-        x_com_err = mtimes(J_com,qdd) + Jd_qd_com - xdd_com_des
-        x_com_cost = w1*dot(x_com_err, x_com_err)
-       
-        # Joint tracking cost
-        q_err = qdd - qdd_des
-        q_cost = w2*dot(q_err,q_err)
-
-        # Foot tracking cost
-        x_foot_err = mtimes(J_foot,qdd) + Jd_qd_foot - xdd_foot_des
-        x_foot_cost = w3*dot(x_foot_err,x_foot_err)
-
-        opti.minimize(x_com_cost + q_cost + x_foot_cost)
-       
-        # Dynamic constraints 
-        f_ext = sum([mtimes(contact_jacobians[i].T, f_contact[i]) for i in range(num_contacts)])
-        
-        opti.subject_to( mtimes(H,qdd) + C == mtimes(B,tau) + f_ext )
-
-        # Friction cone (really pyramid) constraints 
-        for j in range(num_contacts):
-            opti.subject_to(f_contact[j][0] + f_contact[j][1] <= self.mu*f_contact[j][2])
-            opti.subject_to(-f_contact[j][0] + f_contact[j][1] <= self.mu*f_contact[j][2])
-            opti.subject_to(f_contact[j][0] - f_contact[j][1] <= self.mu*f_contact[j][2])
-            opti.subject_to(-f_contact[j][0] - f_contact[j][1] <= self.mu*f_contact[j][2])
-
-        # Warm-start if possible
-        if self.last_iteration_solution is not None:
-            opti.set_initial(self.last_iteration_solution)
-            opti.set_initial(opti.lam_g, self.last_iteration_duals)
-
-        # Solve the QP
-        options = {"ipopt.print_level":0, "print_time": 0}  # supress solver output
-        opti.solver('ipopt',options)
-        sol = opti.solve()
-
-        # Save optimal values for next iteration
-        self.last_iteration_solution = sol.value_variables()
-        self.last_iteration_duals = sol.value(opti.lam_g)
-
-        return sol.value(tau)
-
 
     def DoCalcVectorOutput(self, context, state, unused, output):
         """
         Map from the state (q,qd) to output torques.
         """
 
-        q = state[:self.np]
-        qd = state[self.np:]
+        q, qd = self.StateToQV(state)
 
-        # Run kinematics, which will allow us to calculate the dynamics
+        # Run kinematics, which will allow us to calculate key quantities
         cache = self.tree.doKinematics(q,qd)
 
         # Compute contact jacobians
@@ -265,9 +240,7 @@ class ValkyrieController(VectorSystem):
             contact_jacobians = self.get_contact_jacobians(cache, support="left")
 
         # Compute desired joint acclerations
-        q_nom = self.nominal_state[:self.np]
-        qd_nom = self.nominal_state[self.np:]
-
+        q_nom, qd_nom = self.StateToQV(self.nominal_state)
         qdd_des = 1*(q_nom-q) + 10*(qd_nom-qd)
 
         # Compute desired center of mass acceleration
@@ -288,7 +261,7 @@ class ValkyrieController(VectorSystem):
 
         start_time = time.time()
         # Solve QP to get desired torques
-        tau_qp = self.solve_QP(cache, contact_jacobians, J_foot, Jd_qd_foot, xdd_foot_des, xdd_com_des, qdd_des)
+        u = self.solve_QP(cache, contact_jacobians, J_foot, Jd_qd_foot, xdd_foot_des, xdd_com_des, qdd_des)
         print(time.time()-start_time)
 
-        output[:] = tau_qp
+        output[:] = u

@@ -2,7 +2,7 @@
 
 from pydrake.all import *
 from helpers import *
-from controllers import ValkyrieController
+from controllers import ValkyrieController, ValkyriePDController
 import numpy as np
 
 # Load the model from a urdf file
@@ -24,10 +24,16 @@ controller = builder.AddSystem(ValkyrieController(tree))
 builder.Connect(controller.get_output_port(0), robot.get_input_port(0))
 builder.Connect(robot.get_output_port(0),controller.get_input_port(0))
 
+# Set contact perameters
+contact_params = CompliantContactModelParameters()
+contact_params.v_stiction_tolerance = 0.01
+contact_params.characteristic_radius = 1e-3    # this is a bit stiffer than the default of 2e-4
+robot.set_contact_model_parameters(contact_params)
+
 diagram = builder.Build()
 simulator = Simulator(diagram)
 simulator.set_target_realtime_rate(1.0)
-simulator.set_publish_every_time_step(False)
+simulator.set_publish_every_time_step(True)
 context = simulator.get_mutable_context()
 
 # Set initial state
@@ -36,9 +42,11 @@ initial_state_vec = RPYValkyrieFixedPointState()  # computes [q,qd] for a reason
 state.SetFromVector(initial_state_vec)
 
 # Use a different integrator to speed up simulation (default is RK3)
-integrator = RungeKutta2Integrator(diagram, 2e-3, context)
+integrator = RungeKutta2Integrator(diagram, 2.5e-3, context)
 simulator.reset_integrator(integrator)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(2.0)
+simulator.AdvanceTo(1)
+
+
