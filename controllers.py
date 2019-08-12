@@ -123,12 +123,16 @@ class ValkyriePDController(VectorSystem):
 class ValkyrieController(ValkyriePDController):
     def __init__(self, tree):
         ValkyriePDController.__init__(self, 
-                                      tree)
+                                      tree,
+                                      Kp=10,
+                                      Kd=100)
 
         self.fsm = WalkingFSM()   # Finite State Machine describing CoM trajectory,
                                   # swing foot trajectories, and stance phases.
 
         self.mu = 0.3   # friction coefficient
+
+        self.mp = MathematicalProgram()  # QP that we'll use for whole-body control
 
     def get_foot_contact_points(self):
         """
@@ -187,7 +191,64 @@ class ValkyrieController(ValkyriePDController):
 
         return J, Jd_qd
 
-    def solve_QP(self, cache, xdd_com_des, xdd_foot_des, qdd_des, support="double"):
+    def AddJacobianTypeCost(self, J, qdd, Jd_qd, xdd_des, weight=1.0):
+        """
+        Add a quadratic cost of the form 
+
+            weight*| J*qdd + Jd_qd - xdd_des |^2
+
+        to the whole-body controller QP.
+        """
+        # Put in the form 1/2*qdd'*Q*qdd + c'*qdd for fast formulation
+        Q = weight*np.dot(J.T,J)
+        c = weight*(np.dot(Jd_qd.T,J) - np.dot(xdd_des.T,J)).T
+
+        return self.mp.AddQuadraticCost(Q,c,qdd)
+
+    def AddDynamicsConstraint(self, H, qdd, C, B, tau, contact_jacobians, f_contact):
+        """
+        Add a dynamics constraint of the form 
+
+            H*qdd + C == B*tau + sum(J[i]'*f_contact[i])
+
+        to the whole-body controller QP.
+        """
+        # We'll rewrite the constraints in the form A_eq*x == b_eq for speed
+        A_eq = np.hstack([H, -B])
+	x = np.vstack([qdd,tau])
+
+	for i in range(len(contact_jacobians)):
+	    A_eq = np.hstack([A_eq, -contact_jacobians[i].T])
+	    x = np.vstack([x,f_contact[i]])
+
+	b_eq = -C
+
+	return self.mp.AddLinearEqualityConstraint(A_eq,b_eq,x)
+
+    def AddFrictionPyramidConstraint(self, f_contact):
+        """
+        Add a friction pyramid constraint for the given set of contact forces
+        to the whole-body controller QP. 
+        """
+        num_contacts = len(f_contact)
+
+        A_i = np.asarray([[ 1, 1, -self.mu],   # pyramid approximation of CWC for one
+                          [-1, 1, -self.mu],   # contact force f \in R^3
+                          [-1,-1, -self.mu],
+                          [ 1,-1, -self.mu]])
+
+        # We'll formulate as lb <= Ax <= ub, where x=[f_1',f_2',...]'
+        A = np.kron(np.eye(num_contacts),A_i)
+
+        ub = np.zeros((4*num_contacts,1))
+        lb = -np.inf*np.ones((4*num_contacts,1))
+
+        x = np.vstack([f_contact[i] for i in range(num_contacts)])
+
+        return self.mp.AddLinearConstraint(A=A,lb=lb,ub=ub,vars=x)
+
+
+    def FormulateWholeBodyQP(self, cache, xdd_com_des, xdd_foot_des, qdd_des, support="double"):
         """
         Solve a quadratic program which attempts to regulate the joints to the desired
         accelerations and center of mass to the desired position as follows:
@@ -196,9 +257,6 @@ class ValkyrieController(ValkyriePDController):
             s.t.  H*qdd + C = B*tau + sum(J'*f)
                   f \in friction cones
                   J*qdd + Jd*qd == 0  for all contacts
-
-        Falls back to a PD controller that regulates to a nominal position if the QP
-        is ever infeasible. 
 
         Parameters:
             cache        : kinematics cache for computing dynamic quantities
@@ -210,6 +268,14 @@ class ValkyrieController(ValkyriePDController):
         Returns:
             tau          : joint torques in control space, ready to be applied as outputs
         """
+
+        self.mp = MathematicalProgram()
+
+        # Set weightings for prioritized task-space control
+        w1 = 1.0   # center-of-mass tracking
+        w2 = 0.1   # joint tracking
+        w3 = 1.5   # foot tracking
+
         # Compute dynamic quantities. Note that we cast vectors as nx1 numpy arrays to allow
         # for matrix multiplication with np.dot().
         H = self.tree.massMatrix(cache)                  # Equations of motion
@@ -227,76 +293,37 @@ class ValkyrieController(ValkyriePDController):
             J_foot, Jd_qd_foot = self.get_swing_foot_jacobian(cache,swing_foot_index)
 
         contact_jacobians = self.get_contact_jacobians(cache, support)
+        num_contacts = len(contact_jacobians)
 
+        # Cast desired quantities (for tracking) as nx1 numpy arrays
         xdd_com_des = xdd_com_des[np.newaxis].T
         xdd_foot_des = xdd_foot_des[np.newaxis].T
         qdd_des = qdd_des[np.newaxis].T
 
-        # Set up the QP
-        mp = MathematicalProgram()
-        num_contacts = len(contact_jacobians)
-
-        # Set weightings for prioritized task-space control
-        w1 = 1.0   # center-of-mass tracking
-        w2 = 0.1   # joint tracking
-        w3 = 1.5   # foot tracking
-
         # create optimization variables
-        qdd = mp.NewContinuousVariables(self.nv, 'qdd')   # joint accelerations
-        tau = mp.NewContinuousVariables(self.nu, 'tau')   # applied torques
-        
-        tau = tau[np.newaxis].T    # cast as nx1 numpy arrays
-        qdd = qdd[np.newaxis].T
+        qdd = self.mp.NewContinuousVariables(self.nv, 1, 'qdd')   # joint accelerations
+        tau = self.mp.NewContinuousVariables(self.nu, 1, 'tau')   # applied torques
        
-        f_contact = {}
-        for i in range(num_contacts):        # contact forces
-            f_contact[i] = mp.NewContinuousVariables(3, 'f_%s'%i)
+        f_contact = [self.mp.NewContinuousVariables(3,1,'f_%s'%i) for i in range(num_contacts)]
 
         # Center of mass tracking cost
-        x_com_err = np.dot(J_com,qdd) + Jd_qd_com - xdd_com_des
-        x_com_cost = np.dot(x_com_err.T,x_com_err)    # this is a 1x1 np.ndarray and we need a pydrake.symbolic.Expression
-        x_com_cost = x_com_cost[0,0]                  # to use as a cost, so we simply extract the first element.
-
-        mp.AddQuadraticCost(w1*x_com_cost)
+        com_cost = self.AddJacobianTypeCost(J_com, qdd, Jd_qd_com, xdd_com_des, weight=w1)
        
         # Joint tracking cost
-        q_err = qdd - qdd_des
-        q_cost = np.dot(q_err.T,q_err)
-        q_cost = q_cost[0,0]
-
-        mp.AddQuadraticCost(w2*q_cost)
+        joint_cost = self.mp.AddQuadraticErrorCost(Q=w2*np.eye(self.nv),x_desired=qdd_des,vars=qdd)
 
         # Foot tracking cost
         if support != "double":
-            x_foot_err = np.dot(J_foot,qdd) + Jd_qd_foot - xdd_foot_des
-            x_foot_cost = np.dot(x_foot_err.T,x_foot_err)[0,0]
-
-            mp.AddQuadraticCost(w3*x_foot_cost)
+            foot_cost = self.AddJacobianTypeCost(J_foot, qdd, Jd_qd_foot, xdd_foot_des, weight=w3)
        
         # Dynamic constraints 
-        f_ext = sum([np.dot(contact_jacobians[i].T, f_contact[i][np.newaxis].T) for i in range(num_contacts)])
-        lhs = np.dot(H,qdd) + C
-        rhs = np.dot(B,tau) + f_ext
-
-        for i in range(self.nv):
-            mp.AddLinearConstraint(lhs[i,0] == rhs[i,0])
+        dynamics_constraint = self.AddDynamicsConstraint(H, qdd, C, B, tau, contact_jacobians, f_contact)
 
         # Friction cone (really pyramid) constraints 
-        for j in range(num_contacts):
-            mp.AddLinearConstraint(f_contact[j][0] + f_contact[j][1] <= self.mu*f_contact[j][2])
-            mp.AddLinearConstraint(-f_contact[j][0] + f_contact[j][1] <= self.mu*f_contact[j][2])
-            mp.AddLinearConstraint(f_contact[j][0] - f_contact[j][1] <= self.mu*f_contact[j][2])
-            mp.AddLinearConstraint(-f_contact[j][0] - f_contact[j][1] <= self.mu*f_contact[j][2])
+        friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
 
-        # Solve the QP
-        result = Solve(mp)
+        return tau  # a reference to the symbolic variable we'll use the value of as the applied control
 
-        if result.is_success():
-            return result.GetSolution(tau)
-        else:
-            print("Whole-body QP Solver Failed! Falling back to PD controller")
-            return self.ComputePDControl(q,qd,feedforward=True)
-    
 
     def DoCalcVectorOutput(self, context, state, unused, output):
         """
@@ -317,7 +344,7 @@ class ValkyrieController(ValkyriePDController):
         xd_com = np.dot(self.tree.centerOfMassJacobian(cache), qd)
         x_com_nom, xd_com_nom = self.fsm.ComTrajectory(context.get_time())
 
-        xdd_com_des = 100*(x_com_nom-x_com) + 10*(xd_com_nom-xd_com)
+        xdd_com_des = 100*(x_com_nom-x_com) + 100*(xd_com_nom-xd_com)
 
         # Compute desired swing (right) foot acceleration
         swing_foot_index = self.tree.FindBody('rightFoot').get_body_index()
@@ -331,9 +358,16 @@ class ValkyrieController(ValkyriePDController):
         # Specify support phase
         support = self.fsm.SupportPhase(context.get_time())
 
-        start_time = time.time()
-        # Solve QP to get desired torques
-        u = self.solve_QP(cache, xdd_com_des, xdd_foot_des, qdd_des, support)
-        print(time.time()-start_time)
+        # Formulate the whole-body QP to get desired torques
+        tau = self.FormulateWholeBodyQP(cache, xdd_com_des, xdd_foot_des, qdd_des, support)
+
+        # Solve the whole-body QP
+        result = Solve(self.mp)
+
+        if result.is_success():
+            u = result.GetSolution(tau)
+        else:
+            print("Whole-body QP Solver Failed! Falling back to PD controller")
+            u = self.ComputePDControl(q,qd,feedforward=True)
 
         output[:] = u
