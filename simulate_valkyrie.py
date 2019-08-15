@@ -2,7 +2,7 @@
 
 from pydrake.all import *
 from helpers import *
-from controllers import ValkyrieController, ValkyriePDController
+from controllers import ValkyrieQPController, ValkyriePDController
 import numpy as np
 
 # Load the model from a urdf file
@@ -20,15 +20,21 @@ visualizer = builder.AddSystem(DrakeVisualizer(tree,lc))
 builder.Connect(robot.get_output_port(0), visualizer.get_input_port(0))
 
 # Connect the controller
-controller = builder.AddSystem(ValkyrieController(tree))
+controller = builder.AddSystem(ValkyrieQPController(tree))
 builder.Connect(controller.get_output_port(0), robot.get_input_port(0))
 builder.Connect(robot.get_output_port(0),controller.get_input_port(0))
 
 # Set contact perameters
 contact_params = CompliantContactModelParameters()
-contact_params.v_stiction_tolerance = 0.01
-contact_params.characteristic_radius = 1e-3    # this is a bit stiffer than the default of 2e-4
-robot.set_contact_model_parameters(contact_params)
+contact_params.v_stiction_tolerance = 1e-5     # default 0.01
+contact_params.characteristic_radius = 5e-4    # this is a bit stiffer than the default of 2e-4
+#robot.set_contact_model_parameters(contact_params)
+
+material = CompliantMaterial()
+material.set_friction(0.9)
+material.set_dissipation(0.32)
+material.set_youngs_modulus(1e8)
+#robot.set_default_compliant_material(material)
 
 diagram = builder.Build()
 simulator = Simulator(diagram)
@@ -42,7 +48,13 @@ initial_state_vec = RPYValkyrieFixedPointState()  # computes [q,qd] for a reason
 state.SetFromVector(initial_state_vec)
 
 # Use a different integrator to speed up simulation (default is RK3)
-integrator = RungeKutta2Integrator(diagram, 2.5e-3, context)
+#integrator = simulator.get_mutable_integrator()
+#integrator.set_fixed_step_mode(True)
+#integrator.set_maximum_step_size(0.003)
+#integrator.set_target_accuracy(1e-5)
+#context.SetAccuracy(1e-5)
+
+integrator = RungeKutta2Integrator(diagram, 2.5e-3, context)  # use 5e-4 to avoid sliding-contact problem 
 simulator.reset_integrator(integrator)
 
 # Run the simulation

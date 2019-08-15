@@ -8,6 +8,7 @@ import numpy as np
 import time
 from pydrake.all import *
 from helpers import *
+from walking_pattern_generator import WalkingFSM, StandingFSM
 
 class ZeroInputController(VectorSystem):
     """
@@ -20,52 +21,6 @@ class ZeroInputController(VectorSystem):
     def DoCalcVectorOutput(self, context, state, unused, output):
         output[:] = 0
 
-class WalkingFSM(object):
-    """
-    A finite state machine describing a simple walking motion. Specifies support phase
-    and center of mass position as functions of time. 
-    """
-    def __init__(self):
-        self.t_switch = 1.0
-
-    def SupportPhase(self, time):
-        """
-        Return the current support phase, "double", "left", or "right".
-        """
-        if time <= self.t_switch:
-            return "double"
-        else:
-            return "left"
-
-    def ComTrajectory(self, time):
-        """
-        Return a desired center of mass position and velocity for the given timestep
-        """
-        # for now we'll consider this trajectory to be a straight line connecting 
-        # two points
-
-        if time <= self.t_switch:
-            x_com =  [0.0, (0.1/self.t_switch)*time, 1.0]
-            xd_com = [0.0, 0.1/self.t_switch, 0.0]
-        else:
-            x_com = [0.0, 0.1, 1.0]
-            xd_com = [0.0, 0.0, 0.0]
-
-        return (x_com, xd_com)
-
-    def SwingFootTrajectory(self, time):
-        """
-        Specify a desired position and velocity for the swing foot
-        """
-        # Right now just specify a trajectory for the right foot
-        if time <= self.t_switch:
-            x_foot = [-0.075,-0.153,0.0827]
-            xd_foot = [0.0, 0.0, 0.0]
-        else:
-            x_foot = [-0.075+0.5*(time-self.t_switch),-0.153,0.0827]
-            xd_foot = [0.5, 0.0, 0.0]
-
-        return (x_foot, xd_foot)
 
 class ValkyriePDController(VectorSystem):
     """
@@ -120,19 +75,31 @@ class ValkyriePDController(VectorSystem):
         output[:] = self.ComputePDControl(q,qd,feedforward=True)
         
 
-class ValkyrieController(ValkyriePDController):
+class ValkyrieQPController(ValkyriePDController):
     def __init__(self, tree):
         ValkyriePDController.__init__(self, 
                                       tree,
-                                      Kp=10,
-                                      Kd=100)
+                                      Kp=100,  # feedback gains for fallback controller
+                                      Kd=10)
 
-        self.fsm = WalkingFSM()   # Finite State Machine describing CoM trajectory,
-                                  # swing foot trajectories, and stance phases.
+        n_steps = 2
+        step_length = 0.5
+        step_height = 0.2
+        step_time = 1.0
+        #self.fsm = WalkingFSM(n_steps,       # Finite State Machine describing CoM trajectory,
+        #                      step_length,   # swing foot trajectories, and stance phases.
+        #                      step_height,
+        #                      step_time)
+        self.fsm = StandingFSM()
+                              
 
-        self.mu = 0.3   # friction coefficient
+        self.mu = 0.3             # assumed friction coefficient
 
         self.mp = MathematicalProgram()  # QP that we'll use for whole-body control
+
+        self.right_foot_index = self.tree.FindBody('rightFoot').get_body_index()
+        self.left_foot_index = self.tree.FindBody('leftFoot').get_body_index()
+        self.world_index = self.tree.world().get_body_index()
 
     def get_foot_contact_points(self):
         """
@@ -153,38 +120,42 @@ class ValkyrieController(ValkyriePDController):
         Return a list of contact jacobians for the given support phase (double, right, or left). 
         Assumes that each foot has corner contacts as defined by self.get_foot_contact_points().
         """
-        world_index = self.tree.world().get_body_index()
-        right_foot_index = self.tree.FindBody('rightFoot').get_body_index()
-        left_foot_index = self.tree.FindBody('leftFoot').get_body_index()
         
         if support == "double":
-            feet = [right_foot_index, left_foot_index]
+            feet = [self.right_foot_index, self.left_foot_index]
         elif support == "right":
-            feet = [right_foot_index]
+            feet = [self.right_foot_index]
         elif support == "left":
-            feet = [left_foot_index]
+            feet = [self.left_foot_index]
 
         contact_jacobians = []
+        contact_jacobians_dot_v = []
 
         for foot_index in feet:
             for contact_point in self.get_foot_contact_points():
                 J = self.tree.transformPointsJacobian(cache,             # kinematics cache
                                                       contact_point,     # point in foot frame
                                                       foot_index,        # foot frame index
-                                                      world_index,       # world frame index
+                                                      self.world_index,  # world frame index
                                                       False)             # in terms of qd as opposed to v
+
+                Jd_v = self.tree.transformPointsJacobianDotTimesV(cache,
+                                                                  contact_point,
+                                                                  foot_index,
+                                                                  self.world_index)
                                                                       
                 contact_jacobians.append(J)
+                contact_jacobians_dot_v.append(Jd_v[np.newaxis].T)
 
-        return contact_jacobians
+        return contact_jacobians, contact_jacobians_dot_v
 
-    def get_swing_foot_jacobian(self, cache, foot_index):
+    def get_body_jacobian(self, cache, body_index):
         """
-        For the given foot, compute the jacobian J and time derivative Jd*qd.
+        For the given body index, compute the jacobian J and time derivative Jd*qd in the
+        world frame. 
         """
-        world_index = self.tree.world().get_body_index()
-        J = self.tree.transformPointsJacobian(cache, [0,0,0], foot_index, world_index, False)
-        Jd_qd = self.tree.transformPointsJacobianDotTimesV(cache,[0,0,0], foot_index, world_index)
+        J = self.tree.transformPointsJacobian(cache, [0,0,0], body_index, self.world_index, False)
+        Jd_qd = self.tree.transformPointsJacobianDotTimesV(cache,[0,0,0], body_index, self.world_index)
 
         # Cast vector as 1xn numpy array
         Jd_qd = Jd_qd[np.newaxis].T
@@ -204,6 +175,19 @@ class ValkyrieController(ValkyriePDController):
         c = weight*(np.dot(Jd_qd.T,J) - np.dot(xdd_des.T,J)).T
 
         return self.mp.AddQuadraticCost(Q,c,qdd)
+
+    def AddJacobianTypeConstraint(self, J, qdd, Jd_qd, xdd_des):
+        """
+        Add a linear constraint of the form
+
+            J*qdd + Jd_qd == xdd_des
+
+        to the whole-body controller QP.
+        """
+        A_eq = J     # A_eq*qdd == b_eq
+        b_eq = xdd_des-Jd_qd
+
+        return self.mp.AddLinearEqualityConstraint(A_eq, b_eq, qdd)
 
     def AddDynamicsConstraint(self, H, qdd, C, B, tau, contact_jacobians, f_contact):
         """
@@ -248,33 +232,49 @@ class ValkyrieController(ValkyriePDController):
         return self.mp.AddLinearConstraint(A=A,lb=lb,ub=ub,vars=x)
 
 
-    def FormulateWholeBodyQP(self, cache, xdd_com_des, xdd_foot_des, qdd_des, support="double"):
+    def FormulateWholeBodyQP(self, cache, xdd_com_des, hd_com_des, xdd_left_des, xdd_right_des, qdd_des, support="double"):
         """
-        Solve a quadratic program which attempts to regulate the joints to the desired
+        Formulates a quadratic program which attempts to regulate the joints to the desired
         accelerations and center of mass to the desired position as follows:
 
-            min   w_1*| J_com*qdd + J_comd*qd - xdd_com_des |^2 + w_2*| qdd_des - qdd |^2
-            s.t.  H*qdd + C = B*tau + sum(J'*f)
-                  f \in friction cones
-                  J*qdd + Jd*qd == 0  for all contacts
+        minimize:
+
+            w_1* || J_com*qdd + Jd_com*qd - xdd_com_des ||^2 + 
+            w_2* || A*qdd + Ad*qd - hd_com_des ||^2 +
+            w_3* || qdd_des - qdd ||^2 +
+            w_4* || J_left*qdd + Jd_left*qd - xdd_left_des ||^2 +
+            w_4* || J_right*qdd + Jd_right*qd - xdd_right_des ||^2 +
+            w_5* || J_contact*qdd + Jd_contact*qd - (-K)*v_contact ||^2
+
+        subject to:
+            
+                H*qdd + C = B*tau + sum(J'*f)
+                f \in friction cones
 
         Parameters:
-            cache        : kinematics cache for computing dynamic quantities
-            xdd_com_des  : desired center of mass acceleration
-            xdd_foot_des : desired acceleration of the swing foot, used if support="left" or "right"
-            qdd_des      : desired joint acceleration
-            support      : what stance phase we're in. "double", "left", or "right"
-
-        Returns:
-            tau          : joint torques in control space, ready to be applied as outputs
+            cache         : kinematics cache for computing dynamic quantities
+            xdd_com_des   : desired center of mass acceleration
+            hd_com_des    : desired centroidal momentum dot
+            xdd_left_des  : desired acceleration of the left foot
+            xdd_right_des : desired acceleration of the right foot
+            qdd_des       : desired joint acceleration
+            support       : what stance phase we're in. "double", "left", or "right"
         """
 
         self.mp = MathematicalProgram()
 
-        # Set weightings for prioritized task-space control
-        w1 = 1.0   # center-of-mass tracking
-        w2 = 0.1   # joint tracking
-        w3 = 1.5   # foot tracking
+        
+        ############## Tuneable Paramters ################
+
+        w1 = 1.0   # center-of-mass tracking weight
+        w2 = 0.0001  # centroid momentum weight
+        w3 = 0.01   # joint tracking weight
+        w4 = 5.0    # foot tracking weight
+        w5 = 5.0    # contact acceleration weight
+
+        Kd_contact = 10  # P gain to damp contact movement
+        
+        ##################################################
 
         # Compute dynamic quantities. Note that we cast vectors as nx1 numpy arrays to allow
         # for matrix multiplication with np.dot().
@@ -282,23 +282,17 @@ class ValkyrieController(ValkyriePDController):
         C = self.tree.dynamicsBiasTerm(cache, {}, True)[np.newaxis].T
         B = self.tree.B
 
+        A = self.tree.centroidalMomentumMatrix(cache)
+        Ad_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
+
         J_com = self.tree.centerOfMassJacobian(cache)    # Center of mass jacobian
         Jd_qd_com = self.tree.centerOfMassJacobianDotTimesV(cache)[np.newaxis].T
-        
-        if support == "left":                            # swing foot jacobians
-            swing_foot_index = self.tree.FindBody('rightFoot').get_body_index()
-            J_foot, Jd_qd_foot = self.get_swing_foot_jacobian(cache,swing_foot_index)
-        elif support == "right":
-            swing_foot_index = self.tree.FindBody('leftFoot').get_body_index()
-            J_foot, Jd_qd_foot = self.get_swing_foot_jacobian(cache,swing_foot_index)
+       
+        J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index)  # foot jacobians
+        J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index)
 
-        contact_jacobians = self.get_contact_jacobians(cache, support)
+        contact_jacobians, contact_jacobians_dot_v = self.get_contact_jacobians(cache, support)
         num_contacts = len(contact_jacobians)
-
-        # Cast desired quantities (for tracking) as nx1 numpy arrays
-        xdd_com_des = xdd_com_des[np.newaxis].T
-        xdd_foot_des = xdd_foot_des[np.newaxis].T
-        qdd_des = qdd_des[np.newaxis].T
 
         # create optimization variables
         qdd = self.mp.NewContinuousVariables(self.nv, 1, 'qdd')   # joint accelerations
@@ -308,13 +302,26 @@ class ValkyrieController(ValkyriePDController):
 
         # Center of mass tracking cost
         com_cost = self.AddJacobianTypeCost(J_com, qdd, Jd_qd_com, xdd_com_des, weight=w1)
+
+        # Centroidal momentum cost
+        centroidal_cost = self.AddJacobianTypeCost(A, qdd, Ad_qd, hd_com_des, weight=w2)
        
         # Joint tracking cost
-        joint_cost = self.mp.AddQuadraticErrorCost(Q=w2*np.eye(self.nv),x_desired=qdd_des,vars=qdd)
+        joint_cost = self.mp.AddQuadraticErrorCost(Q=w3*np.eye(self.nv),x_desired=qdd_des,vars=qdd)
 
         # Foot tracking cost
-        if support != "double":
-            foot_cost = self.AddJacobianTypeCost(J_foot, qdd, Jd_qd_foot, xdd_foot_des, weight=w3)
+        left_foot_cost = self.AddJacobianTypeCost(J_left, qdd, Jd_qd_left, xdd_left_des, weight=w4)
+        right_foot_cost = self.AddJacobianTypeCost(J_right, qdd, Jd_qd_right, xdd_right_des, weight=w4)
+
+        # Contact acceleration cost
+        for j in range(num_contacts):
+            J_cont = contact_jacobians[j]
+            Jd_qd_cont = contact_jacobians_dot_v[j]
+
+            xd_cont = np.dot(J_cont,self.qd)[np.newaxis].T
+            xdd_cont_des = -Kd_contact*xd_cont
+
+            contact_cost = self.AddJacobianTypeCost(J_cont, qdd, Jd_qd_cont, xdd_cont_des, weight=w5)
        
         # Dynamic constraints 
         dynamics_constraint = self.AddDynamicsConstraint(H, qdd, C, B, tau, contact_jacobians, f_contact)
@@ -330,36 +337,64 @@ class ValkyrieController(ValkyriePDController):
         Map from the state (q,qd) to output torques.
         """
 
-        q, qd = self.StateToQV(state)
+        ############## Tuneable Paramters ################
+
+        Kp_q = 100     # Joint angle PD gains
+        Kd_q = 10
+
+        Kp_com = 50   # Center of mass PD gains
+        Kd_com = 50
+
+        Kp_h = 1.0    # Centroid momentum P gain
+
+        Kp_foot = 50   # foot position PD gains
+        Kd_foot = 100 
+
+        ##################################################
+
+        st = time.time()
+
+        self.q, self.qd = self.StateToQV(state)
 
         # Run kinematics, which will allow us to calculate key quantities
-        cache = self.tree.doKinematics(q,qd)
+        cache = self.tree.doKinematics(self.q, self.qd)
 
         # Compute desired joint acclerations
         q_nom, qd_nom = self.StateToQV(self.nominal_state)
-        qdd_des = 1*(q_nom-q) + 10*(qd_nom-qd)
+        qdd_des = Kp_q*(q_nom-self.q) + Kd_q*(qd_nom-self.qd)
+        qdd_des = qdd_des[np.newaxis].T
 
         # Compute desired center of mass acceleration
-        x_com = self.tree.centerOfMass(cache)
-        xd_com = np.dot(self.tree.centerOfMassJacobian(cache), qd)
+        x_com = self.tree.centerOfMass(cache)[np.newaxis].T
+        xd_com = np.dot(self.tree.centerOfMassJacobian(cache), self.qd)[np.newaxis].T
         x_com_nom, xd_com_nom = self.fsm.ComTrajectory(context.get_time())
+        xdd_com_des = Kp_com*(x_com_nom-x_com) + Kd_com*(xd_com_nom-xd_com)
 
-        xdd_com_des = 100*(x_com_nom-x_com) + 100*(xd_com_nom-xd_com)
+        # Compute desired centroid momentum dot
+        A_com = self.tree.centroidalMomentumMatrix(cache)
+        Ad_com_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
+        h_com = np.dot(A_com, self.qd)[np.newaxis].T
+        h_com_nom = np.zeros((6,1))
+        hd_com_des = Kp_h*(h_com_nom - h_com)
 
-        # Compute desired swing (right) foot acceleration
-        swing_foot_index = self.tree.FindBody('rightFoot').get_body_index()
-        J_foot, Jd_qd_foot = self.get_swing_foot_jacobian(cache,swing_foot_index)
-        x_foot = self.tree.transformPoints(cache,[0,0,0],swing_foot_index,0).flatten()
-        xd_foot = np.dot(J_foot,qd)
-        x_foot_nom, xd_foot_nom = self.fsm.SwingFootTrajectory(context.get_time())
-        
-        xdd_foot_des = 100*(x_foot_nom-x_foot) + 1*(xd_foot_nom-xd_foot)
+        # Computed desired accelerations of the feet
+        J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index)
+        x_left = self.tree.transformPoints(cache, [0,0,0], self.left_foot_index, self.world_index)
+        xd_left = np.dot(J_left, self.qd)[np.newaxis].T
+        x_left_nom, xd_left_nom = self.fsm.LeftFootTrajectory(context.get_time())
+        xdd_left_des = Kp_foot*(x_left_nom-x_left) + Kd_foot*(xd_left_nom - xd_left)
+
+        J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index)
+        x_right = self.tree.transformPoints(cache, [0,0,0], self.right_foot_index, self.world_index)
+        xd_right = np.dot(J_right, self.qd)[np.newaxis].T
+        x_right_nom, xd_right_nom = self.fsm.LeftFootTrajectory(context.get_time())
+        xdd_right_des = Kp_foot*(x_right_nom-x_right) + Kd_foot*(xd_right_nom - xd_right)
 
         # Specify support phase
         support = self.fsm.SupportPhase(context.get_time())
 
         # Formulate the whole-body QP to get desired torques
-        tau = self.FormulateWholeBodyQP(cache, xdd_com_des, xdd_foot_des, qdd_des, support)
+        tau = self.FormulateWholeBodyQP(cache, xdd_com_des, hd_com_des, xdd_left_des, xdd_right_des, qdd_des, support)
 
         # Solve the whole-body QP
         result = Solve(self.mp)
@@ -368,6 +403,6 @@ class ValkyrieController(ValkyriePDController):
             u = result.GetSolution(tau)
         else:
             print("Whole-body QP Solver Failed! Falling back to PD controller")
-            u = self.ComputePDControl(q,qd,feedforward=True)
+            u = self.ComputePDControl(self.q,self.qd,feedforward=True)
 
         output[:] = u
