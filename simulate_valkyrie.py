@@ -26,15 +26,15 @@ builder.Connect(robot.get_output_port(0),controller.get_input_port(0))
 
 # Set contact perameters
 contact_params = CompliantContactModelParameters()
-contact_params.v_stiction_tolerance = 1e-5     # default 0.01
-contact_params.characteristic_radius = 5e-4    # this is a bit stiffer than the default of 2e-4
-#robot.set_contact_model_parameters(contact_params)
+contact_params.v_stiction_tolerance = 1e-2     # default 0.01
+contact_params.characteristic_radius = 2e-4    # this is a bit stiffer than the default of 2e-4
+robot.set_contact_model_parameters(contact_params)
 
 material = CompliantMaterial()
 material.set_friction(0.9)
 material.set_dissipation(0.32)
 material.set_youngs_modulus(1e8)
-#robot.set_default_compliant_material(material)
+robot.set_default_compliant_material(material)
 
 diagram = builder.Build()
 simulator = Simulator(diagram)
@@ -59,6 +59,6 @@ simulator.reset_integrator(integrator)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(2)
+simulator.AdvanceTo(2.0)
 
 

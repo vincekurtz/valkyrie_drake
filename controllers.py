@@ -83,9 +83,9 @@ class ValkyrieQPController(ValkyriePDController):
                                       Kd=10)
 
         self.fsm = WalkingFSM(n_steps=2,         # Finite State Machine describing CoM trajectory,
-                              step_length=0.5,   # swing foot trajectories, and stance phases.
-                              step_height=0.15,
-                              step_time=1.0)
+                              step_length=0.2,   # swing foot trajectories, and stance phases.
+                              step_height=0.05,
+                              step_time=0.7)
         #self.fsm = StandingFSM()
                               
 
@@ -343,15 +343,15 @@ class ValkyrieQPController(ValkyriePDController):
 
         ############## Tuneable Paramters ################
 
-        Kp_q = 100     # Joint angle PD gains
-        Kd_q = 10
+        Kp_q = 10     # Joint angle PD gains
+        Kd_q = 50
 
         Kp_com = 500   # Center of mass PD gains
         Kd_com = 50
 
         Kp_h = 10.0    # Centroid momentum P gain
 
-        Kp_foot = 100.0   # foot position PD gains
+        Kp_foot = 200.0   # foot position PD gains
         Kd_foot = 100.0 
 
         ##################################################
@@ -396,6 +396,8 @@ class ValkyrieQPController(ValkyriePDController):
         xdd_right_des = Kp_foot*(x_right_nom-x_right) + Kd_foot*(xd_right_nom - xd_right)
 
         print(x_com_nom-x_com)
+        print(x_right_nom-x_right)
+        print("")
 
         # Specify support phase
         support = self.fsm.SupportPhase(context.get_time())
