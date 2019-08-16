@@ -2,7 +2,7 @@
 
 from pydrake.all import *
 from helpers import *
-from controllers import ValkyrieQPController, ValkyriePDController
+from controllers import ValkyrieQPController, ValkyriePDController, ZeroInputController
 import numpy as np
 
 # Load the model from a urdf file

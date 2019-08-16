@@ -82,15 +82,11 @@ class ValkyrieQPController(ValkyriePDController):
                                       Kp=100,  # feedback gains for fallback controller
                                       Kd=10)
 
-        n_steps = 2
-        step_length = 0.5
-        step_height = 0.2
-        step_time = 1.0
-        #self.fsm = WalkingFSM(n_steps,       # Finite State Machine describing CoM trajectory,
-        #                      step_length,   # swing foot trajectories, and stance phases.
-        #                      step_height,
-        #                      step_time)
-        self.fsm = StandingFSM()
+        self.fsm = WalkingFSM(n_steps=2,         # Finite State Machine describing CoM trajectory,
+                              step_length=0.5,   # swing foot trajectories, and stance phases.
+                              step_height=0.15,
+                              step_time=1.0)
+        #self.fsm = StandingFSM()
                               
 
         self.mu = 0.3             # assumed friction coefficient
@@ -250,6 +246,8 @@ class ValkyrieQPController(ValkyriePDController):
             
                 H*qdd + C = B*tau + sum(J'*f)
                 f \in friction cones
+                J_cj*qdd + J'_cj*qd == -Kd_contact*xd_cj + nu
+                nu_min <= nu <= nu_max
 
         Parameters:
             cache         : kinematics cache for computing dynamic quantities
@@ -266,13 +264,15 @@ class ValkyrieQPController(ValkyriePDController):
         
         ############## Tuneable Paramters ################
 
-        w1 = 1.0   # center-of-mass tracking weight
-        w2 = 0.0001  # centroid momentum weight
-        w3 = 0.01   # joint tracking weight
-        w4 = 5.0    # foot tracking weight
-        w5 = 5.0    # contact acceleration weight
+        w1 = 50.0   # center-of-mass tracking weight
+        w2 = 0.01  # centroid momentum weight
+        w3 = 0.5   # joint tracking weight
+        w4 = 50.0    # foot tracking weight
 
-        Kd_contact = 10  # P gain to damp contact movement
+        Kd_contact = 10  # P gain to damp contact acceleration
+
+        nu_min = -0.001   # slack for contact constraint
+        nu_max = 0.001
         
         ##################################################
 
@@ -313,7 +313,7 @@ class ValkyrieQPController(ValkyriePDController):
         left_foot_cost = self.AddJacobianTypeCost(J_left, qdd, Jd_qd_left, xdd_left_des, weight=w4)
         right_foot_cost = self.AddJacobianTypeCost(J_right, qdd, Jd_qd_right, xdd_right_des, weight=w4)
 
-        # Contact acceleration cost
+        # Contact acceleration constraint
         for j in range(num_contacts):
             J_cont = contact_jacobians[j]
             Jd_qd_cont = contact_jacobians_dot_v[j]
@@ -321,7 +321,11 @@ class ValkyrieQPController(ValkyriePDController):
             xd_cont = np.dot(J_cont,self.qd)[np.newaxis].T
             xdd_cont_des = -Kd_contact*xd_cont
 
-            contact_cost = self.AddJacobianTypeCost(J_cont, qdd, Jd_qd_cont, xdd_cont_des, weight=w5)
+            contact_constraint = self.AddJacobianTypeConstraint(J_cont, qdd, Jd_qd_cont, xdd_cont_des)
+ 
+            # add some slight flexibility to this constraint to avoid infeasibility
+            contact_constraint.evaluator().UpdateUpperBound(nu_max*np.array([1.0,1.0,1.0]))
+            contact_constraint.evaluator().UpdateLowerBound(nu_min*np.array([1.0,1.0,1.0]))
        
         # Dynamic constraints 
         dynamics_constraint = self.AddDynamicsConstraint(H, qdd, C, B, tau, contact_jacobians, f_contact)
@@ -342,13 +346,13 @@ class ValkyrieQPController(ValkyriePDController):
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
 
-        Kp_com = 50   # Center of mass PD gains
+        Kp_com = 500   # Center of mass PD gains
         Kd_com = 50
 
-        Kp_h = 1.0    # Centroid momentum P gain
+        Kp_h = 10.0    # Centroid momentum P gain
 
-        Kp_foot = 50   # foot position PD gains
-        Kd_foot = 100 
+        Kp_foot = 100.0   # foot position PD gains
+        Kd_foot = 100.0 
 
         ##################################################
 
@@ -368,6 +372,7 @@ class ValkyrieQPController(ValkyriePDController):
         x_com = self.tree.centerOfMass(cache)[np.newaxis].T
         xd_com = np.dot(self.tree.centerOfMassJacobian(cache), self.qd)[np.newaxis].T
         x_com_nom, xd_com_nom = self.fsm.ComTrajectory(context.get_time())
+        
         xdd_com_des = Kp_com*(x_com_nom-x_com) + Kd_com*(xd_com_nom-xd_com)
 
         # Compute desired centroid momentum dot
@@ -387,8 +392,10 @@ class ValkyrieQPController(ValkyriePDController):
         J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index)
         x_right = self.tree.transformPoints(cache, [0,0,0], self.right_foot_index, self.world_index)
         xd_right = np.dot(J_right, self.qd)[np.newaxis].T
-        x_right_nom, xd_right_nom = self.fsm.LeftFootTrajectory(context.get_time())
+        x_right_nom, xd_right_nom = self.fsm.RightFootTrajectory(context.get_time())
         xdd_right_des = Kp_foot*(x_right_nom-x_right) + Kd_foot*(xd_right_nom - xd_right)
+
+        print(x_com_nom-x_com)
 
         # Specify support phase
         support = self.fsm.SupportPhase(context.get_time())
