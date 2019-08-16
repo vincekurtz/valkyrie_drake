@@ -45,6 +45,11 @@ context = simulator.get_mutable_context()
 # Set initial state
 state = context.get_mutable_continuous_state_vector()
 initial_state_vec = RPYValkyrieFixedPointState()  # computes [q,qd] for a reasonable starting position
+
+# Model push disturbance by setting initial velocity of the floating base
+initial_state_vec[tree.get_num_positions()] = -0.1  # x velocity
+initial_state_vec[tree.get_num_positions()+1] = -0.2  # y velocity
+
 state.SetFromVector(initial_state_vec)
 
 # Use a different integrator to speed up simulation (default is RK3)
