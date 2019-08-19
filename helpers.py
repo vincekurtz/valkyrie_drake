@@ -7,132 +7,6 @@ import numpy as np
 import time
 from pydrake.all import *
 
-def ManipulatorDynamics(plant, q, v=None):
-    """
-    Return manipulator dynamic quantities M, Cv, tauG, B, and tauExt,
-    where
-
-    M(q)v + C(q,v)v = tauG + Bu + tauExt.
-
-    Adopted from http://underactuated.mit.edu/underactuated.html?chapter=intro.
-    """
-    assert isinstance(plant,MultibodyPlant)
-
-    # Note that in the long term it would probably be worthwhile to create symbolic 
-    # functions for these quantities.
-    context = plant.CreateDefaultContext()
-    plant.SetPositions(context, q)
-    if v is not None:
-        plant.SetVelocities(context, v)
-    M = plant.CalcMassMatrixViaInverseDynamics(context)
-    Cv = plant.CalcBiasTerm(context)
-    tauG = plant.CalcGravityGeneralizedForces(context)
-    B = plant.MakeActuationMatrix()
-
-    # External forces assumed to be zero here
-    forces = MultibodyForces(plant)
-    plant.CalcForceElementsContribution(context, forces)
-    tauExt = forces.generalized_forces()
-
-    return (M, Cv, tauG, B, tauExt)
-
-
-def solve_joint_accel_QP(M, Cv, tauG, B, tauExt, vd_des):
-    """
-    Solve a quadratic program which attempts to track the given desired
-    joint accelerations vd_des. Specifically, we will return the actuator inputs u
-    that solve the following optimization problem:
-
-        min   | vd - vd_des |^2
-        s.t.  M*vd + Cv = tauG + B*u + tauExt
-
-    """
-
-    start_time = time.time()
-    # Decision variables
-    mp = MathematicalProgram()
-    vd = mp.NewContinuousVariables(len(vd_des),'vd')
-    u = mp.NewContinuousVariables(B.shape[1],'u')
-
-    # Cast everybody into a np.matrix or vertical numpy array so we can use python2.7's matrix
-    # multiplication tools effectively. 
-
-    M = np.matrix(M)              # pre-determinined variables
-    Cv = Cv[np.newaxis].T
-    tauG = tauG[np.newaxis].T
-    B = np.matrix(B)
-    tauExt = tauExt[np.newaxis].T
-    vd_des = vd_des[np.newaxis].T
-
-    vd = vd[np.newaxis].T         # decision variables
-    u = u[np.newaxis].T
-
-    Q = np.eye(len(vd_des))       # cost function parameters
-    Q = np.matrix(Q)  
-
-    # Add cost function to the QP
-    cost = (vd_des.T-vd.T)*Q*(vd_des-vd)  # cost is a 1x1 np.matrix. We need it to be a pydrake.symbolic.Expression
-    mp.AddQuadraticCost(cost[0,0])        # to use it in the mp, so we extract the first element here.
-
-    # Add constraints to the QP
-    Mvd = M*vd
-    Bu = B*u
-    for i in range(M.shape[0]):
-        mp.AddLinearConstraint(Mvd[i,0] + Cv[i] - tauG[i] - Bu[i,0] - tauExt[i] == 0)
-
-    # solve the QP
-    result = Solve(mp)
-
-    print(time.time() - start_time)
-
-    return result.GetSolution(u)
-    
-
-
-def QP_example():
-    """
-    Example of using Drake to solve a quadratic program
-
-        min   1/2x'Qx + c'x
-        s.t.  Ax <= b
-    """
-    # Cost and constraint parameters
-    Q = np.matrix([[1, -1],     # we need to use matrices and the '*' operator for
-                  [-1, 2]])     # matrix multiplication so that we can multiply these mp.Variable objects,
-    c = np.matrix([[-2],[-6]])  # which are numpy arrays with dtype=object, which np.matmul doesn't support.
-
-    A = np.matrix([[1,  1],
-                  [-1, 2],
-                  [2,  1]])
-
-    b = np.matrix([[2],[2],[3]])
-
-    # Set up the problem
-    mp = MathematicalProgram()
-    x = mp.NewContinuousVariables(2,"x")
-    x = x[np.newaxis].T         # formulate as proper (vertical) vector
-
-    # Add the cost
-    mp.AddQuadraticCost(Q,c,x)
-
-    # Add constraints elementwise, since drake's (in)equality constraints don't seem to be able
-    # to handle vector inequalities.
-    Ax = A*x
-    for i in range(b.shape[0]):
-        Ax_i = Ax[i,0]
-        mp.AddLinearConstraint(Ax[i,0] <= b[i])
-  
-    # Get the solution
-    result = Solve(mp)
-    print("Result: x = %s" % result.GetSolution(x))
-    print("")
-    print("Used solver [%s]" % result.get_solver_id().name())
-    print("Run time %s s" % result.get_solver_details().run_time)
-
-    return result
-
-
-
 def list_joints_and_actuators(robot):
     """
     Run through all the joints and actuators in the robot model 
@@ -143,7 +17,6 @@ def list_joints_and_actuators(robot):
         joint = joint_actuator.joint()
 
         print("Actuator [%s] acts on joint [%s]" % (joint_actuator.name(),joint.name()))
-
 
 def ValkyrieFixedPointState():
     """
@@ -227,46 +100,6 @@ def RPYValkyrieFixedPointTorque():
 
     return tau
 
-def ValkyrieFixedPointTorque():
-    """
-    Return torques that hold the robot (approximately) at the fixed position
-    expressed by ValkyrieFixedPointState().
-    """
-    tau = np.zeros(30)
-    tau[0] = 1.894    # spine
-    tau[1] = 54.1    # spine
-    tau[2] = -1.2    # spine
-    tau[3] = 0    # l hip
-    tau[4] = -11.4    # l hip
-    tau[5] = 10.2    # l hip
-    tau[6] = -117    # l knee
-    tau[7] = 52.2    # l ancle
-    tau[8] = 0.24    # l ancle
-    tau[9] = 0    # r hip
-    tau[10] = 12.02   # r hip 
-    tau[11] = -10.2   # r hip
-    tau[12] = -117   # r knee
-    tau[13] = 52.9   # r ancle
-    tau[14] = 0.24   # r ancle
-    tau[15] = 0   # l shoulder
-    tau[16] = 0   # l shoulder
-    tau[17] = 0   # l shoulder
-    tau[18] = 0   # l elbow
-    tau[19] = 0   # l wrist
-    tau[20] = 0   # l wrist
-    tau[21] = 0   # l wrist
-    tau[22] = 0   # r shoulder
-    tau[23] = 0   # r shoulder
-    tau[24] = 0   # r shoulder
-    tau[25] = 0   # r elbow
-    tau[26] = 0   # r wrist
-    tau[27] = 0   # r wrist
-    tau[28] = 0   # r wrist
-    tau[29] = 0   # neck
-
-    return tau
-    
-
 def RPYValkyrieFixedPointState():
     """
     Return a reasonable initial state for the Valkyrie humanoid. 
@@ -286,36 +119,4 @@ def RPYValkyrieFixedPointState():
     qd = np.zeros(len(q))
 
     return np.hstack((q,qd))
-
-if __name__=="__main__":
-    # DEBUG
-    float_formatter = lambda x : "%.2f" % x 
-    np.set_printoptions(formatter={'float_kind':float_formatter})
-
-    # Print joint names for RBT and MBT
-    fname = "drake/examples/valkyrie/urdf/urdf/valkyrie_A_sim_drake_one_neck_dof_wide_ankle_rom.urdf"
-    urdf = FindResourceOrThrow(fname)
-    rbt = RigidBodyTree(urdf, FloatingBaseType.kRollPitchYaw)
-
-    builder = DiagramBuilder()
-    scene_graph = builder.AddSystem(SceneGraph())
-    mbp = builder.AddSystem(MultibodyPlant(time_step=1e-3))
-    Parser(plant=mbp).AddModelFromFile(urdf)
-    mbp.Finalize()
-
-    # Test joint space mapping
-    state_RBT = RPYValkyrieFixedPointState()
-    q_RBT = state_RBT[6:36]
-
-    state_MBP = ValkyrieFixedPointState()
-    q_MBP = state_MBP[7:37]
-
-    X = MBP_RBT_joint_angle_map(mbp,rbt)
-
-    B_rbt = rbt.B
-    B_mbp = mbp.MakeActuationMatrix()
-
-    print(np.dot(X,q_MBP))
-    print(q_RBT)
-
 
