@@ -2,7 +2,7 @@
 
 from pydrake.all import *
 from helpers import *
-from controllers import ValkyrieController
+from controllers import *
 import numpy as np
 
 # Load the valkyrie model from a urdf file
@@ -13,6 +13,12 @@ scene_graph = builder.AddSystem(SceneGraph())
 plant = builder.AddSystem(MultibodyPlant(time_step=1e-3))
 plant.RegisterAsSourceForSceneGraph(scene_graph)
 Parser(plant=plant).AddModelFromFile(robot_urdf)
+
+
+# Use the (admittedly depreciated) RigidBodyTree interface for dynamics
+# calculations, since python bindings for MultibodyPlant dynamics don't seem to 
+# exist yet. This should allow us to keep using MBP for the simulation, which seems to work a lot better.
+tree = RigidBodyTree(robot_urdf, FloatingBaseType.kRollPitchYaw)
 
 # Add a flat ground with friction
 X_BG = RigidTransform()
@@ -48,7 +54,7 @@ builder.Connect(
         scene_graph.get_source_pose_port(plant.get_source_id()))
 
 # Set up a controller
-controller = builder.AddSystem(ValkyrieController(plant))
+controller = builder.AddSystem(ValkyriePDController(tree,plant))
 builder.Connect(
         plant.get_state_output_port(),
         controller.get_input_port(0))
@@ -67,18 +73,19 @@ plant_context = diagram.GetMutableSubsystemContext(plant, diagram_context)
 
 # Simulator setup
 simulator = Simulator(diagram, diagram_context)
-simulator.set_target_realtime_rate(1.0)
+simulator.set_target_realtime_rate(0.5)
 simulator.set_publish_every_time_step(False)
 
 # Set initial state
 state = plant_context.get_mutable_discrete_state_vector()
 initial_state_vec = ValkyrieFixedPointState()  # computes [q,qd] for a reasonable starting position
+initial_state_vec[29] = 0
 state.SetFromVector(initial_state_vec)
 
 # Use a different integrator to speed up simulation (default is RK3)
-integrator = RungeKutta2Integrator(diagram, 5e-4, diagram_context)
+integrator = RungeKutta2Integrator(diagram, 5e-3, diagram_context)
 simulator.reset_integrator(integrator)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(0.50)
+simulator.AdvanceTo(2.0)
