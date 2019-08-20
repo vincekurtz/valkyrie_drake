@@ -105,7 +105,7 @@ class ValkyrieQPController(ValkyriePDController):
 
         self.fsm = WalkingFSM(n_steps=2,         # Finite State Machine describing CoM trajectory,
                               step_length=0.5,   # swing foot trajectories, and stance phases.
-                              step_height=0.15,
+                              step_height=0.10,
                               step_time=1.0)
         #self.fsm = StandingFSM()
 
@@ -257,7 +257,7 @@ class ValkyrieQPController(ValkyriePDController):
             
                 H*qdd + C = B*tau + sum(J'*f)
                 f \in friction cones
-                J_cj*qdd + J'_cj*qd == -Kd_contact*xd_cj + nu
+                J_cj*qdd + J'_cj*qd == nu
                 nu_min <= nu <= nu_max
         Parameters:
             cache         : kinematics cache for computing dynamic quantities
@@ -278,8 +278,6 @@ class ValkyrieQPController(ValkyriePDController):
         w2 = 0.01  # centroid momentum weight
         w3 = 0.5   # joint tracking weight
         w4 = 50.0    # foot tracking weight
-
-        Kd_contact = 10  # P gain to damp contact acceleration
 
         nu_min = -0.001   # slack for contact constraint
         nu_max = 0.001
@@ -327,9 +325,7 @@ class ValkyrieQPController(ValkyriePDController):
         for j in range(num_contacts):
             J_cont = contact_jacobians[j]
             Jd_qd_cont = contact_jacobians_dot_v[j]
-
-            xd_cont = np.dot(J_cont,self.qd)[np.newaxis].T
-            xdd_cont_des = -Kd_contact*xd_cont
+            xdd_cont_des = 0
 
             contact_constraint = self.AddJacobianTypeConstraint(J_cont, qdd, Jd_qd_cont, xdd_cont_des)
  
@@ -368,20 +364,20 @@ class ValkyrieQPController(ValkyriePDController):
 
         st = time.time()
 
-        self.q, self.qd = self.StateToQQDot(state)
+        q, qd = self.StateToQQDot(state)
 
         # Run kinematics, which will allow us to calculate key quantities
-        cache = self.tree.doKinematics(self.q, self.qd)
+        cache = self.tree.doKinematics(q, qd)
 
         # Compute desired joint acclerations
         q_nom = self.nominal_state[0:self.np]
         qd_nom = self.nominal_state[self.np:]
-        qdd_des = Kp_q*(q_nom-self.q) + Kd_q*(qd_nom-self.qd)
+        qdd_des = Kp_q*(q_nom-q) + Kd_q*(qd_nom-qd)
         qdd_des = qdd_des[np.newaxis].T
 
         # Compute desired center of mass acceleration
         x_com = self.tree.centerOfMass(cache)[np.newaxis].T
-        xd_com = np.dot(self.tree.centerOfMassJacobian(cache), self.qd)[np.newaxis].T
+        xd_com = np.dot(self.tree.centerOfMassJacobian(cache), qd)[np.newaxis].T
         x_com_nom, xd_com_nom = self.fsm.ComTrajectory(context.get_time())
         
         xdd_com_des = Kp_com*(x_com_nom-x_com) + Kd_com*(xd_com_nom-xd_com)
@@ -389,20 +385,20 @@ class ValkyrieQPController(ValkyriePDController):
         # Compute desired centroid momentum dot
         A_com = self.tree.centroidalMomentumMatrix(cache)
         Ad_com_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
-        h_com = np.dot(A_com, self.qd)[np.newaxis].T
+        h_com = np.dot(A_com, qd)[np.newaxis].T
         h_com_nom = np.zeros((6,1))
         hd_com_des = Kp_h*(h_com_nom - h_com)
 
         # Computed desired accelerations of the feet
         J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index)
         x_left = self.tree.transformPoints(cache, [0,0,0], self.left_foot_index, self.world_index)
-        xd_left = np.dot(J_left, self.qd)[np.newaxis].T
+        xd_left = np.dot(J_left, qd)[np.newaxis].T
         x_left_nom, xd_left_nom = self.fsm.LeftFootTrajectory(context.get_time())
         xdd_left_des = Kp_foot*(x_left_nom-x_left) + Kd_foot*(xd_left_nom - xd_left)
 
         J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index)
         x_right = self.tree.transformPoints(cache, [0,0,0], self.right_foot_index, self.world_index)
-        xd_right = np.dot(J_right, self.qd)[np.newaxis].T
+        xd_right = np.dot(J_right, qd)[np.newaxis].T
         x_right_nom, xd_right_nom = self.fsm.RightFootTrajectory(context.get_time())
         xdd_right_des = Kp_foot*(x_right_nom-x_right) + Kd_foot*(xd_right_nom - xd_right)
 
@@ -421,6 +417,6 @@ class ValkyrieQPController(ValkyriePDController):
             u = result.GetSolution(tau)
         else:
             print("Whole-body QP Solver Failed! Falling back to PD controller")
-            u = self.ComputePDControl(self.q,self.qd,feedforward=True)
+            u = self.ComputePDControl(q,qd,feedforward=True)
 
         output[:] = u

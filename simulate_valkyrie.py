@@ -79,4 +79,4 @@ state.SetFromVector(initial_state_vec)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(5.0)
+simulator.AdvanceTo(10.0)
