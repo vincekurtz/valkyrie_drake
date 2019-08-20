@@ -361,7 +361,7 @@ class WalkingFSM(object):
         x_zmp = self.zmp_trajectory.value(time)
         x_com = np.vstack((x_zmp,self.x_com_init[2]))
         x_com[1] /= 1.5
-        x_com[0] += 0.1
+        x_com[0] += 0.05
 
         xd_zmp = self.zmp_trajectory.derivative(1).value(time)
         xd_com = np.vstack((xd_zmp,0.0))

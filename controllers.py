@@ -73,7 +73,7 @@ class ValkyriePDController(VectorSystem):
 
         return (q,qd)
 
-    def ComputePDControl(self,q,qd,feedforward=True):
+    def ComputePDControl(self, q, qd, feedforward=True):
         """
         Map state [q,qd] to control inputs [u].
         """
@@ -103,8 +103,8 @@ class ValkyrieQPController(ValkyriePDController):
     def __init__(self, tree, plant):
         ValkyriePDController.__init__(self, tree, plant)
 
-        self.fsm = WalkingFSM(n_steps=2,         # Finite State Machine describing CoM trajectory,
-                              step_length=0.5,   # swing foot trajectories, and stance phases.
+        self.fsm = WalkingFSM(n_steps=6,         # Finite State Machine describing CoM trajectory,
+                              step_length=0.25,   # swing foot trajectories, and stance phases.
                               step_height=0.10,
                               step_time=1.0)
         #self.fsm = StandingFSM()
@@ -123,10 +123,10 @@ class ValkyrieQPController(ValkyriePDController):
         (this is a rough guess based on self.tree.getTerrainContactPoints)
         """
         corner_contacts = (
-                            [-0.069, 0.08, 0.0],
-                            [-0.069,-0.08, 0.0],
-                            [ 0.201,-0.08, 0.0],
-                            [ 0.201, 0.08, 0.0]
+                            np.array([-0.069, 0.08, -0.09]),
+                            np.array([-0.069,-0.08, -0.09]),
+                            np.array([ 0.201,-0.08, -0.09]),
+                            np.array([ 0.201, 0.08, -0.09])
                           )
 
         return corner_contacts
@@ -165,18 +165,50 @@ class ValkyrieQPController(ValkyriePDController):
 
         return contact_jacobians, contact_jacobians_dot_v
 
-    def get_body_jacobian(self, cache, body_index):
+    def get_body_jacobian(self, cache, body_index, relative_position=[0,0,0]):
         """
         For the given body index, compute the jacobian J and time derivative Jd*qd in the
         world frame. 
         """
-        J = self.tree.transformPointsJacobian(cache, [0,0,0], body_index, self.world_index, False)
-        Jd_qd = self.tree.transformPointsJacobianDotTimesV(cache,[0,0,0], body_index, self.world_index)
+        J = self.tree.transformPointsJacobian(cache, relative_position, body_index, self.world_index, False)
+        Jd_qd = self.tree.transformPointsJacobianDotTimesV(cache, relative_position, body_index, self.world_index)
 
         # Cast vector as 1xn numpy array
         Jd_qd = Jd_qd[np.newaxis].T
 
         return J, Jd_qd
+    
+    def get_desired_foot_accelerations(self, cache, time, qd, Kp, Kd):
+        """
+        Compute desired accelerations of the four corners of the given foot, such that
+        the foot should remain flat and track the desired center trajectory.
+        """
+
+        xdd_left_des = []  # return a list of desired accelerations for each corner of the foot
+        xdd_right_des = []
+
+        for corner_point in self.get_foot_contact_points():
+            # Left foot
+            J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index, relative_position=corner_point)
+            x_left = self.tree.transformPoints(cache, corner_point, self.left_foot_index, self.world_index)
+            xd_left = np.dot(J_left, qd)[np.newaxis].T
+
+            x_left_nom, xd_left_nom = self.fsm.LeftFootTrajectory(time)
+            x_left_nom += corner_point[np.newaxis].T
+
+            xdd_left_des.append( Kp*(x_left_nom-x_left) + Kd*(xd_left_nom - xd_left) )
+            
+            # Right foot
+            J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index, relative_position=corner_point)
+            x_right = self.tree.transformPoints(cache, corner_point, self.right_foot_index, self.world_index)
+            xd_right = np.dot(J_right, qd)[np.newaxis].T
+
+            x_right_nom, xd_right_nom = self.fsm.RightFootTrajectory(time)
+            x_right_nom += corner_point[np.newaxis].T
+
+            xdd_right_des.append( Kp*(x_right_nom-x_right) + Kd*(xd_right_nom - xd_right) )
+
+        return (xdd_left_des, xdd_right_des)
 
     def AddJacobianTypeCost(self, J, qdd, Jd_qd, xdd_des, weight=1.0):
         """
@@ -242,6 +274,8 @@ class ValkyrieQPController(ValkyriePDController):
         return self.mp.AddLinearConstraint(A=A,lb=lb,ub=ub,vars=x)
 
 
+
+
     def FormulateWholeBodyQP(self, cache, xdd_com_des, hd_com_des, xdd_left_des, xdd_right_des, qdd_des, support="double"):
         """
         Formulates a quadratic program which attempts to regulate the joints to the desired
@@ -252,7 +286,6 @@ class ValkyrieQPController(ValkyriePDController):
             w_3* || qdd_des - qdd ||^2 +
             w_4* || J_left*qdd + Jd_left*qd - xdd_left_des ||^2 +
             w_4* || J_right*qdd + Jd_right*qd - xdd_right_des ||^2 +
-            w_5* || J_contact*qdd + Jd_contact*qd - (-K)*v_contact ||^2
         subject to:
             
                 H*qdd + C = B*tau + sum(J'*f)
@@ -317,10 +350,17 @@ class ValkyrieQPController(ValkyriePDController):
         # Joint tracking cost
         joint_cost = self.mp.AddQuadraticErrorCost(Q=w3*np.eye(self.nv),x_desired=qdd_des,vars=qdd)
 
-        # Foot tracking cost
-        left_foot_cost = self.AddJacobianTypeCost(J_left, qdd, Jd_qd_left, xdd_left_des, weight=w4)
-        right_foot_cost = self.AddJacobianTypeCost(J_right, qdd, Jd_qd_right, xdd_right_des, weight=w4)
+        # Foot tracking costs: add a cost for each corner of the foot
+        corners = self.get_foot_contact_points()
+        for i in range(len(corners)):
+            # Left foot tracking cost for this corner
+            J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index, relative_position=corners[i])
+            self.AddJacobianTypeCost(J_left, qdd, Jd_qd_left, xdd_left_des[i], weight=w4)
 
+            # Right foot tracking cost
+            J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index, relative_position=corners[i])
+            self.AddJacobianTypeCost(J_right, qdd, Jd_qd_right, xdd_right_des[i], weight=w4)
+            
         # Contact acceleration constraint
         for j in range(num_contacts):
             J_cont = contact_jacobians[j]
@@ -389,20 +429,11 @@ class ValkyrieQPController(ValkyriePDController):
         h_com_nom = np.zeros((6,1))
         hd_com_des = Kp_h*(h_com_nom - h_com)
 
-        # Computed desired accelerations of the feet
-        J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index)
-        x_left = self.tree.transformPoints(cache, [0,0,0], self.left_foot_index, self.world_index)
-        xd_left = np.dot(J_left, qd)[np.newaxis].T
-        x_left_nom, xd_left_nom = self.fsm.LeftFootTrajectory(context.get_time())
-        xdd_left_des = Kp_foot*(x_left_nom-x_left) + Kd_foot*(xd_left_nom - xd_left)
-
-        J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index)
-        x_right = self.tree.transformPoints(cache, [0,0,0], self.right_foot_index, self.world_index)
-        xd_right = np.dot(J_right, qd)[np.newaxis].T
-        x_right_nom, xd_right_nom = self.fsm.RightFootTrajectory(context.get_time())
-        xdd_right_des = Kp_foot*(x_right_nom-x_right) + Kd_foot*(xd_right_nom - xd_right)
-
-        print(x_com_nom-x_com)
+        # Computed desired accelerations of the feet (at the corner points)
+        xdd_left_des, xdd_right_des = self.get_desired_foot_accelerations(cache, 
+                                                                          context.get_time(), 
+                                                                          qd, 
+                                                                          Kp_foot, Kd_foot)
 
         # Specify support phase
         support = self.fsm.SupportPhase(context.get_time())
