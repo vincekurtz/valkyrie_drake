@@ -7,9 +7,10 @@
 #
 ##
 
+import time as pytime
 import numpy as np
-from copy import copy
-from pydrake.all import PiecewisePolynomial, MathematicalProgram, Solve
+from copy import copy as pycopy
+from pydrake.all import *
 
 class StandingFSM(object):
     """
@@ -70,12 +71,18 @@ class WalkingFSM(object):
         self.total_time = self.step_time*self.n_phases  
 
         # initial CoM and foot positions
-        self.x_com_init = np.asarray([[0.0], [0.0], [0.967]])
+        self.x_com_init = np.asarray([[0.0074], [0.0], [0.967]])
+        self.xd_com_init = np.asarray([[0.0], [0.0], [0.0]])
+
         self.x_right_init = np.asarray([[-0.071], [-0.138], [0.099]])
         self.x_left_init = np.asarray([[-0.071], [0.138], [0.099]])
 
         self.foot_width = 0.16  # for visualization purposes only
         self.foot_length = 0.27
+
+        # LIP parameters
+        self.h = self.x_com_init[2]  
+        self.g = 9.81
 
         # Generate foot ground contact placements for both feet
         self.right_foot_placements = [self.x_right_init]
@@ -89,21 +96,23 @@ class WalkingFSM(object):
                 l = self.step_length
             if step % 2 == 0:
                 # Step with the right foot
-                x_right = copy(self.right_foot_placements[-1])
+                x_right = pycopy(self.right_foot_placements[-1])
                 x_right[0,0] += l
                 self.right_foot_placements.append(x_right)
             else:
                 # Step with the left foot
-                x_left = copy(self.left_foot_placements[-1])
+                x_left = pycopy(self.left_foot_placements[-1])
                 x_left[0,0] += l
                 self.left_foot_placements.append(x_left)
 
         # Generate ZMP trajectory as function of time
         self._generate_zmp_trajectory()
 
+        # Generate CoM trajectory as function of time using the LIP
+        self._generate_com_trajectory()
+
         # Generate foot trajectories as functions of time.
         self._generate_foot_trajectories()
-
 
 
     def create_plottable_foot_polygon(self, x_foot, alpha=1.0):
@@ -136,10 +145,12 @@ class WalkingFSM(object):
         ax = fig.add_subplot(111,projection='3d')
         ax.view_init(30,60)
 
-        timesteps = np.arange(0,self.total_time,0.1)
+        timesteps = np.arange(0,self.total_time,0.05)
 
         rf_poly = None
         lf_poly = None
+        x_com = self.x_com_init
+        xd_com = self.xd_com_init
         for t in timesteps:
 
             # Remove previous foot polygons.
@@ -162,11 +173,11 @@ class WalkingFSM(object):
             ax.scatter(p_zmp[0],p_zmp[1], 0.099)
 
             # Plot CoM position
-            x_com, xd_com = self.ComTrajectory(t)
+            x_com = self.com_trajectory.value(t)
             ax.scatter(x_com[0], x_com[1], x_com[2])
 
             plt.draw()
-            plt.pause(0.01)
+            plt.pause(0.001)
 
         plt.show()
     
@@ -213,6 +224,34 @@ class WalkingFSM(object):
 
         self.zmp_trajectory = PiecewisePolynomial.FirstOrderHold(break_times,zmp_ref)
 
+    def _generate_com_trajectory(self):
+        """
+        Compute a desired CoM trajectory that tracks the desired ZMP trajectory and
+        parameterize as a piecwise polynomial. Once this method has been called, the
+        center of mass position, velocity, and accleration at a given timestep t can 
+        be accessed as
+
+            x_com = self.com_trajectory.value(t)
+            xd_com = self.com_trajectory.derivative(1).value(t)
+            xdd_com = self.com_trajectory.derivative(2).value(t).
+        """
+        dt = 0.1
+        n_steps = int(self.total_time/dt)
+
+        # Solve an MPC problem over the whole trajectory
+        x, u, y = self.ZMPComMPC(0.0, self.x_com_init, self.xd_com_init, dt=dt, n_steps=n_steps)
+
+        # Extract center of mass trajectory, adding z axis back in
+        x_com_trajectory = np.vstack([x[0:2,:],self.h*np.ones((1,n_steps))])
+        xd_com_trajectory = np.vstack([x[2:4,:],np.zeros((1,n_steps))])
+        xdd_com_trajectory = np.vstack([u,np.zeros((1,n_steps))])
+
+        # Specify break points for polynomial interpolation
+        break_times = np.asarray([[i*dt] for i in range(n_steps)])
+
+        # Perform polynomial interpolation
+        self.com_trajectory = PiecewisePolynomial.Cubic(break_times,x_com_trajectory,xd_com_trajectory)
+
     def _generate_foot_trajectories(self):
         """
         Generate a desired (x,y,z) trajectory for each foot as a piecewise polynomial.
@@ -234,7 +273,7 @@ class WalkingFSM(object):
             phase_time = (t/self.step_time) % 4
             if 1 < phase_time and phase_time < 2:
                 # Right foot is in the middle of its swing phase
-                rf_ref = copy(self.right_foot_placements[rf_idx])
+                rf_ref = pycopy(self.right_foot_placements[rf_idx])
                 rf_ref[0] += self.step_length/2  # move the foot forward to the midpoint of the stride
                 rf_ref[2] += self.step_height    # and up the designated hight
 
@@ -246,7 +285,7 @@ class WalkingFSM(object):
 
             elif 3 < phase_time and phase_time < 4:
                 # Left foot is in the middle of its swing phase
-                lf_ref = copy(self.left_foot_placements[lf_idx])
+                lf_ref = pycopy(self.left_foot_placements[lf_idx])
                 lf_ref[0] += self.step_length/2  # move the foot forward to the midpoint of the stride
                 lf_ref[2] += self.step_height    # and up the designated hight
 
@@ -283,19 +322,11 @@ class WalkingFSM(object):
         elif time/self.step_time % 4 <= 4:
             return "right" 
 
-    def ZMPComMPC(self, time, x_com, xd_com):
+    def ZMPComMPC(self, time, x_com, xd_com, dt=0.1, n_steps=10):
         """
         Solve an MPC problem to determine CoM position, velocity, and acceleration
         that will track the desired ZMP trajectory at the given timestep.
         """
-        # MPC parameters
-        dt = 0.01
-        n_steps = 10
-
-        # LIP parameters
-        h = self.x_com_init[2]  
-        g = 9.81
-
         # LIP Dynamics in discrete time
 	A = np.eye(4)
 	A[0:2,2:4] = dt*np.eye(2)
@@ -307,7 +338,7 @@ class WalkingFSM(object):
 	C = np.zeros((2,4))
 	C[0:2,0:2] = np.eye(2)
 
-	D = -h/g*np.eye(2)
+	D = -self.h/self.g*np.eye(2)
 
         # Set up the Trajectory optimization problem
         mp = MathematicalProgram()
@@ -318,6 +349,11 @@ class WalkingFSM(object):
         # Initial constraint
         mp.AddLinearEqualityConstraint(np.eye(2), x_com[0:2], x[0:2,0])
         mp.AddLinearEqualityConstraint(np.eye(2), xd_com[0:2], x[2:4,0])
+
+        # Cost parameters
+        Q = 20*np.eye(2)
+        Qf = 10*np.eye(2)
+        R = np.eye(2)
 
         for i in range(n_steps-1):
             # Dynamic Constraint
@@ -332,46 +368,38 @@ class WalkingFSM(object):
 
             # Cost
             y_des = self.zmp_trajectory.value(time+dt*i)
-            mp.AddQuadraticErrorCost(np.eye(2), y_des, y[:,i])
+            mp.AddQuadraticErrorCost(Q, y_des, y[:,i])
 
+            mp.AddQuadraticCost(R, np.zeros((2,1)), u[:,i])
 
-        res = Solve(mp)
+        # Terminal cost
+        y_des = self.zmp_trajectory.value(time+dt*n_steps)
+        mp.AddQuadraticErrorCost(Qf,y_des, y[:,n_steps-1])
+        mp.AddQuadraticCost(R, np.zeros((2,1)), u[:,n_steps-1])
 
-        print(res.GetSolution(x))
-
-
-        # DEBUG
-
-        import matplotlib.pyplot as plt
+        solver = OsqpSolver()
+        res = solver.Solve(mp, initial_guess=None, solver_options=None)
 
         x = res.GetSolution(x)
+        u = res.GetSolution(u)
+        y = res.GetSolution(y)
 
-        plt.plot(x.T)
-        plt.show()
-
-
+        return (x,u,y)
 
     def ComTrajectory(self, time):
         """
-        Return a desired center of mass position and velocity for the given timestep
+        Return the desired position, velocity, and acceleration of the center of 
+        mass at the given time.
         """
-        # TODO: specify trajectory that tracks the ZMP trajectory using LIP model
+        x_com = self.com_trajectory.value(time)
+        xd_com = self.com_trajectory.derivative(1).value(time)
+        xdd_com = self.com_trajectory.derivative(2).value(time)
 
-        # For now we'll consider the CoM to be directly above the ZMP
-        x_zmp = self.zmp_trajectory.value(time)
-        x_com = np.vstack((x_zmp,self.x_com_init[2]))
-        x_com[1] /= 1.5
-        x_com[0] += 0.05
-
-        xd_zmp = self.zmp_trajectory.derivative(1).value(time)
-        xd_com = np.vstack((xd_zmp,0.0))
-        xd_com[1] /= 1.5
-
-        return (x_com, xd_com)
+        return (x_com, xd_com, xdd_com)
 
     def RightFootTrajectory(self, time):
         """
-        Specify a desired position and velocity for the right foot
+        Return a desired position and velocity for the right foot
         """
         x_right = self.right_foot_trajectory.value(time)
         xd_right = self.right_foot_trajectory.derivative(1).value(time)
@@ -380,7 +408,7 @@ class WalkingFSM(object):
     
     def LeftFootTrajectory(self, time):
         """
-        Specify a desired position and velocity for the left foot
+        Return a desired position and velocity for the left foot
         """
         x_left = self.left_foot_trajectory.value(time)
         xd_left = self.left_foot_trajectory.derivative(1).value(time)
@@ -393,11 +421,9 @@ if __name__=="__main__":
     n_steps = 4
     step_length = 0.5
     step_height = 0.1
-    step_time = 1.0
+    step_time = 0.5
 
     fsm = WalkingFSM(n_steps, step_length, step_height, step_time)
 
-    fsm.ZMPComMPC(0.0, fsm.x_com_init, np.asarray([[0.0],[0.0],[0.0]]))
-    # Debugging: plot the ZMP trajectory
-    #fsm.plot_walking_pattern()
+    fsm.plot_walking_pattern()
 
