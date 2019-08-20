@@ -109,7 +109,7 @@ class ValkyrieQPController(ValkyriePDController):
                               step_time=1.0)
         #self.fsm = StandingFSM()
 
-        self.mu = 0.3             # assumed friction coefficient
+        self.mu = 0.2             # assumed friction coefficient
 
         self.mp = MathematicalProgram()  # QP that we'll use for whole-body control
 

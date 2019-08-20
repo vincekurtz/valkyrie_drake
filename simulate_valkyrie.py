@@ -38,10 +38,6 @@ plant.RegisterVisualGeometry(
         "ground_visual",
         np.array([0.5,0.5,0.5,0.0]))    # Color set to be completely transparent
 
-# Turn off gravity (for testing)
-#g = plant.mutable_gravity_field()
-#g.set_gravity_vector([0,0,0])
-
 plant.Finalize()
 assert plant.geometry_source_is_registered()
 
@@ -78,13 +74,9 @@ simulator.set_publish_every_time_step(False)
 
 # Set initial state
 state = plant_context.get_mutable_discrete_state_vector()
-initial_state_vec = ValkyrieFixedPointState()  # computes [q,qd] for a reasonable starting position
+initial_state_vec = ValkyrieFixedPointState()  # computes [q,v] for a reasonable starting position
 state.SetFromVector(initial_state_vec)
-
-# Use a different integrator to speed up simulation (default is RK3)
-#integrator = RungeKutta2Integrator(diagram, 1e-2, diagram_context)
-#simulator.reset_integrator(integrator)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(4.0)
+simulator.AdvanceTo(5.0)
