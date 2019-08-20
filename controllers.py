@@ -8,12 +8,13 @@ import numpy as np
 import time
 from pydrake.all import *
 from helpers import *
+from walking_pattern_generator import *
 
 class ValkyriePDController(VectorSystem):
     """
     A simple PD controller that regulates the robot to a nominal (standing) position.
     """
-    def __init__(self, tree, plant, Kp=1000.00, Kd=1.0):
+    def __init__(self, tree, plant, Kp=500.00, Kd=2.0):
         
         # Try to ensure that the MultiBodyPlant that we use for simulation matches the
         # RigidBodyTree that we use for computations
@@ -99,18 +100,14 @@ class ValkyriePDController(VectorSystem):
         
 
 class ValkyrieQPController(ValkyriePDController):
-    def __init__(self, tree):
-        ValkyriePDController.__init__(self, 
-                                      tree,
-                                      Kp=100,  # feedback gains for fallback controller
-                                      Kd=10)
+    def __init__(self, tree, plant):
+        ValkyriePDController.__init__(self, tree, plant)
 
         self.fsm = WalkingFSM(n_steps=2,         # Finite State Machine describing CoM trajectory,
                               step_length=0.5,   # swing foot trajectories, and stance phases.
                               step_height=0.15,
                               step_time=1.0)
         #self.fsm = StandingFSM()
-                              
 
         self.mu = 0.3             # assumed friction coefficient
 
@@ -371,13 +368,14 @@ class ValkyrieQPController(ValkyriePDController):
 
         st = time.time()
 
-        self.q, self.qd = self.StateToQV(state)
+        self.q, self.qd = self.StateToQQDot(state)
 
         # Run kinematics, which will allow us to calculate key quantities
         cache = self.tree.doKinematics(self.q, self.qd)
 
         # Compute desired joint acclerations
-        q_nom, qd_nom = self.StateToQV(self.nominal_state)
+        q_nom = self.nominal_state[0:self.np]
+        qd_nom = self.nominal_state[self.np:]
         qdd_des = Kp_q*(q_nom-self.q) + Kd_q*(qd_nom-self.qd)
         qdd_des = qdd_des[np.newaxis].T
 

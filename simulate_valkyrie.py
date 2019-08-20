@@ -54,7 +54,7 @@ builder.Connect(
         scene_graph.get_source_pose_port(plant.get_source_id()))
 
 # Set up a controller
-controller = builder.AddSystem(ValkyriePDController(tree,plant))
+controller = builder.AddSystem(ValkyrieQPController(tree,plant))
 builder.Connect(
         plant.get_state_output_port(),
         controller.get_input_port(0))
@@ -73,19 +73,18 @@ plant_context = diagram.GetMutableSubsystemContext(plant, diagram_context)
 
 # Simulator setup
 simulator = Simulator(diagram, diagram_context)
-simulator.set_target_realtime_rate(0.5)
+simulator.set_target_realtime_rate(1.5)
 simulator.set_publish_every_time_step(False)
 
 # Set initial state
 state = plant_context.get_mutable_discrete_state_vector()
 initial_state_vec = ValkyrieFixedPointState()  # computes [q,qd] for a reasonable starting position
-initial_state_vec[29] = 0
 state.SetFromVector(initial_state_vec)
 
 # Use a different integrator to speed up simulation (default is RK3)
-integrator = RungeKutta2Integrator(diagram, 5e-3, diagram_context)
-simulator.reset_integrator(integrator)
+#integrator = RungeKutta2Integrator(diagram, 1e-2, diagram_context)
+#simulator.reset_integrator(integrator)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(2.0)
+simulator.AdvanceTo(4.0)
