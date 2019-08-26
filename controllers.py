@@ -103,10 +103,10 @@ class ValkyrieQPController(ValkyriePDController):
     def __init__(self, tree, plant):
         ValkyriePDController.__init__(self, tree, plant)
 
-        self.fsm = WalkingFSM(n_steps=4,         # Finite State Machine describing CoM trajectory,
-                              step_length=0.50,   # swing foot trajectories, and stance phases.
+        self.fsm = WalkingFSM(n_steps=3,         # Finite State Machine describing CoM trajectory,
+                              step_length=0.60,   # swing foot trajectories, and stance phases.
                               step_height=0.10,
-                              step_time=1.0)
+                              step_time=0.9)
         #self.fsm = StandingFSM()
 
         self.mu = 0.2             # assumed friction coefficient
@@ -308,7 +308,7 @@ class ValkyrieQPController(ValkyriePDController):
         ############## Tuneable Paramters ################
 
         w1 = 50.0   # center-of-mass tracking weight
-        w2 = 0.01  # centroid momentum weight
+        w2 = 0.1  # centroid momentum weight
         w3 = 0.5   # joint tracking weight
         w4 = 50.0    # foot tracking weight
 
@@ -402,8 +402,6 @@ class ValkyrieQPController(ValkyriePDController):
 
         ##################################################
 
-        st = time.time()
-
         q, qd = self.StateToQQDot(state)
 
         # Run kinematics, which will allow us to calculate key quantities
@@ -419,15 +417,21 @@ class ValkyrieQPController(ValkyriePDController):
         x_com = self.tree.centerOfMass(cache)[np.newaxis].T
         xd_com = np.dot(self.tree.centerOfMassJacobian(cache), qd)[np.newaxis].T
         x_com_nom, xd_com_nom, xdd_com_nom = self.fsm.ComTrajectory(context.get_time())
-       
+      
         xdd_com_des = xdd_com_nom + Kp_com*(x_com_nom-x_com) + Kd_com*(xd_com_nom-xd_com)
 
         # Compute desired centroid momentum dot
         A_com = self.tree.centroidalMomentumMatrix(cache)
         Ad_com_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
         h_com = np.dot(A_com, qd)[np.newaxis].T
-        h_com_nom = np.zeros((6,1))
+
+        m = self.tree.massMatrix(cache)[0,0]  # total mass
+        h_com_nom = np.vstack([np.zeros((3,1)),m*xd_com_nom])  # desired angular velocity is zero,
+                                                               # CoM velocity matches the CoM trajectory
         hd_com_des = Kp_h*(h_com_nom - h_com)
+
+        print(h_com[0:3])
+
 
         # Computed desired accelerations of the feet (at the corner points)
         xdd_left_des, xdd_right_des = self.get_desired_foot_accelerations(cache, 
