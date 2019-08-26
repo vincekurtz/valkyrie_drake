@@ -7,7 +7,6 @@
 #
 ##
 
-import time as pytime
 import numpy as np
 from copy import copy as pycopy
 from pydrake.all import *
@@ -17,7 +16,8 @@ class StandingFSM(object):
     A finite state machine describing simply standing in double support at the given position.
     """
     def __init__(self):
-        self.x_com_init = np.asarray([[0.0], [0.0], [0.967]])
+        self.x_com_init = np.asarray([[0.0074], [0.0], [0.967]])
+
         self.x_right_init = np.asarray([[-0.071], [-0.138], [0.099]])
         self.x_left_init = np.asarray([[-0.071], [0.138], [0.099]])
 
@@ -33,7 +33,8 @@ class StandingFSM(object):
         """
         x_com = self.x_com_init
         xd_com = np.array([[0.0],[0.0],[0.0]])
-        return (x_com, xd_com)
+        xdd_com = np.array([[0.0],[0.0],[0.0]])
+        return (pycopy(x_com), pycopy(xd_com), pycopy(xdd_com))
 
     def RightFootTrajectory(self, time):
         """
@@ -41,7 +42,7 @@ class StandingFSM(object):
         """
         x_right = self.x_right_init
         xd_right = np.array([[0.0],[0.0],[0.0]])
-        return (x_right, xd_right)
+        return (pycopy(x_right), pycopy(xd_right))
     
     def LeftFootTrajectory(self, time):
         """
@@ -49,8 +50,7 @@ class StandingFSM(object):
         """
         x_left = self.x_left_init
         xd_left = np.array([[0.0],[0.0],[0.0]])
-        return (x_left, xd_left)
-
+        return (pycopy(x_left), pycopy(xd_left))
 
 class WalkingFSM(object):
     """
@@ -403,7 +403,7 @@ class WalkingFSM(object):
         """
         x_right = self.right_foot_trajectory.value(time)
         xd_right = self.right_foot_trajectory.derivative(1).value(time)
-
+        
         return (x_right, xd_right)
     
     def LeftFootTrajectory(self, time):

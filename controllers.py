@@ -107,7 +107,7 @@ class ValkyrieQPController(ValkyriePDController):
                               step_length=0.60,   # swing foot trajectories, and stance phases.
                               step_height=0.10,
                               step_time=0.9)
-        #self.fsm = StandingFSM()
+        self.fsm = StandingFSM()
 
         self.mu = 0.2             # assumed friction coefficient
 
@@ -429,9 +429,6 @@ class ValkyrieQPController(ValkyriePDController):
         h_com_nom = np.vstack([np.zeros((3,1)),m*xd_com_nom])  # desired angular velocity is zero,
                                                                # CoM velocity matches the CoM trajectory
         hd_com_des = Kp_h*(h_com_nom - h_com)
-
-        print(h_com[0:3])
-
 
         # Computed desired accelerations of the feet (at the corner points)
         xdd_left_des, xdd_right_des = self.get_desired_foot_accelerations(cache, 

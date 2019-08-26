@@ -10,10 +10,9 @@ robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_A_sim_drake
 robot_urdf = FindResourceOrThrow(robot_description_file)
 builder = DiagramBuilder()
 scene_graph = builder.AddSystem(SceneGraph())
-plant = builder.AddSystem(MultibodyPlant(time_step=1e-3))
+plant = builder.AddSystem(MultibodyPlant(time_step=2e-3))
 plant.RegisterAsSourceForSceneGraph(scene_graph)
 Parser(plant=plant).AddModelFromFile(robot_urdf)
-
 
 # Use the (admittedly depreciated) RigidBodyTree interface for dynamics
 # calculations, since python bindings for MultibodyPlant dynamics don't seem to 
