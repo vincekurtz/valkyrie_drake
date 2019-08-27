@@ -107,7 +107,7 @@ class ValkyrieQPController(ValkyriePDController):
                               step_length=0.60,   # swing foot trajectories, and stance phases.
                               step_height=0.10,
                               step_time=0.9)
-        self.fsm = StandingFSM()
+        #self.fsm = StandingFSM()
 
         self.mu = 0.2             # assumed friction coefficient
 
@@ -276,10 +276,11 @@ class ValkyrieQPController(ValkyriePDController):
 
 
 
-    def FormulateWholeBodyQP(self, cache, xdd_com_des, hd_com_des, xdd_left_des, xdd_right_des, qdd_des, support="double"):
+    def SolveWholeBodyQP(self, cache, xdd_com_des, hd_com_des, xdd_left_des, xdd_right_des, qdd_des, support="double"):
         """
-        Formulates a quadratic program which attempts to regulate the joints to the desired
+        Formulates and solves a quadratic program which attempts to regulate the joints to the desired
         accelerations and center of mass to the desired position as follows:
+
         minimize:
             w_1* || J_com*qdd + Jd_com*qd - xdd_com_des ||^2 + 
             w_2* || A*qdd + Ad*qd - hd_com_des ||^2 +
@@ -287,23 +288,22 @@ class ValkyrieQPController(ValkyriePDController):
             w_4* || J_left*qdd + Jd_left*qd - xdd_left_des ||^2 +
             w_4* || J_right*qdd + Jd_right*qd - xdd_right_des ||^2 +
         subject to:
-            
                 H*qdd + C = B*tau + sum(J'*f)
                 f \in friction cones
                 J_cj*qdd + J'_cj*qd == nu
                 nu_min <= nu <= nu_max
+
         Parameters:
             cache         : kinematics cache for computing dynamic quantities
             xdd_com_des   : desired center of mass acceleration
             hd_com_des    : desired centroidal momentum dot
-            xdd_left_des  : desired acceleration of the left foot
-            xdd_right_des : desired acceleration of the right foot
+            xdd_left_des  : desired accelerations of the left foot contact points
+            xdd_right_des : desired accelerations of the right foot contact points
             qdd_des       : desired joint acceleration
             support       : what stance phase we're in. "double", "left", or "right"
         """
 
         self.mp = MathematicalProgram()
-
         
         ############## Tuneable Paramters ################
 
@@ -379,7 +379,12 @@ class ValkyrieQPController(ValkyriePDController):
         # Friction cone (really pyramid) constraints 
         friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
 
-        return tau  # a reference to the symbolic variable we'll use the value of as the applied control
+        # Solve the QP
+        result = Solve(self.mp)
+
+        assert result.is_success()
+
+        return result.GetSolution(tau)
 
 
     def DoCalcVectorOutput(self, context, state, unused, output):
@@ -439,16 +444,7 @@ class ValkyrieQPController(ValkyriePDController):
         # Specify support phase
         support = self.fsm.SupportPhase(context.get_time())
 
-        # Formulate the whole-body QP to get desired torques
-        tau = self.FormulateWholeBodyQP(cache, xdd_com_des, hd_com_des, xdd_left_des, xdd_right_des, qdd_des, support)
-
-        # Solve the whole-body QP
-        result = Solve(self.mp)
-
-        if result.is_success():
-            u = result.GetSolution(tau)
-        else:
-            print("Whole-body QP Solver Failed! Falling back to PD controller")
-            u = self.ComputePDControl(q,qd,feedforward=True)
+        # Solve the whole-body QP to get desired torques
+        u = self.SolveWholeBodyQP(cache, xdd_com_des, hd_com_des, xdd_left_des, xdd_right_des, qdd_des, support)
 
         output[:] = u

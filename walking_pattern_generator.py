@@ -31,16 +31,16 @@ class StandingFSM(object):
         """
         Return a desired center of mass position and velocity for the given timestep
         """
-        x_com = self.x_com_init
+        x_com = pycopy(self.x_com_init)
         xd_com = np.array([[0.0],[0.0],[0.0]])
         xdd_com = np.array([[0.0],[0.0],[0.0]])
-        return (pycopy(x_com), pycopy(xd_com), pycopy(xdd_com))
+        return (x_com, xd_com, xdd_com)
 
     def RightFootTrajectory(self, time):
         """
         Specify a desired position and velocity for the right foot
         """
-        x_right = self.x_right_init
+        x_right = pycopy(self.x_right_init)
         xd_right = np.array([[0.0],[0.0],[0.0]])
         return (pycopy(x_right), pycopy(xd_right))
     
@@ -48,9 +48,9 @@ class StandingFSM(object):
         """
         Specify a desired position and velocity for the left foot
         """
-        x_left = self.x_left_init
+        x_left = pycopy(self.x_left_init)
         xd_left = np.array([[0.0],[0.0],[0.0]])
-        return (pycopy(x_left), pycopy(xd_left))
+        return (x_left, xd_left)
 
 class WalkingFSM(object):
     """
