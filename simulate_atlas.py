@@ -5,14 +5,18 @@ from helpers import *
 from controllers import *
 import numpy as np
 
-# Load the valkyrie model from a urdf file
-robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_A_sim_drake_one_neck_dof_wide_ankle_rom.urdf"
+# Load the atlas model from a urdf file
+robot_description_file = "drake/examples/atlas/urdf/atlas_minimal_contact.urdf"
 robot_urdf = FindResourceOrThrow(robot_description_file)
 builder = DiagramBuilder()
 scene_graph = builder.AddSystem(SceneGraph())
-plant = builder.AddSystem(MultibodyPlant(time_step=2e-3))
+plant = builder.AddSystem(MultibodyPlant(time_step=5e-4))
 plant.RegisterAsSourceForSceneGraph(scene_graph)
 Parser(plant=plant).AddModelFromFile(robot_urdf)
+
+# Turn off gravity (for testing)
+#g = plant.mutable_gravity_field()
+#g.set_gravity_vector([0,0,0])
 
 # Use the (admittedly depreciated) RigidBodyTree interface for dynamics
 # calculations, since python bindings for MultibodyPlant dynamics don't seem to 
@@ -49,13 +53,13 @@ builder.Connect(
         scene_graph.get_source_pose_port(plant.get_source_id()))
 
 # Set up a controller
-controller = builder.AddSystem(ValkyrieQPController(tree,plant))
+controller = builder.AddSystem(AtlasQPController(tree,plant))
 builder.Connect(
         plant.get_state_output_port(),
         controller.get_input_port(0))
 builder.Connect(
         controller.get_output_port(0),
-        plant.get_actuation_input_port(plant.GetModelInstanceByName('valkyrie')))
+        plant.get_actuation_input_port(plant.GetModelInstanceByName('atlas')))
 
 # Set up the Visualizer
 ConnectDrakeVisualizer(builder=builder, scene_graph=scene_graph)
@@ -68,14 +72,14 @@ plant_context = diagram.GetMutableSubsystemContext(plant, diagram_context)
 
 # Simulator setup
 simulator = Simulator(diagram, diagram_context)
-simulator.set_target_realtime_rate(1.5)
+simulator.set_target_realtime_rate(0.2)
 simulator.set_publish_every_time_step(False)
 
 # Set initial state
 state = plant_context.get_mutable_discrete_state_vector()
-initial_state_vec = ValkyrieFixedPointState()  # computes [q,v] for a reasonable starting position
+initial_state_vec = AtlasFixedPointState()  # computes [q,v] for a reasonable starting position
 state.SetFromVector(initial_state_vec)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(10.0)
+simulator.AdvanceTo(5.0)

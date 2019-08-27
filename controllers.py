@@ -10,11 +10,11 @@ from pydrake.all import *
 from helpers import *
 from walking_pattern_generator import *
 
-class ValkyriePDController(VectorSystem):
+class AtlasPDController(VectorSystem):
     """
     A simple PD controller that regulates the robot to a nominal (standing) position.
     """
-    def __init__(self, tree, plant, Kp=500.00, Kd=2.0):
+    def __init__(self, tree, plant, Kp=1000.0, Kd=5.0):
         
         # Try to ensure that the MultiBodyPlant that we use for simulation matches the
         # RigidBodyTree that we use for computations
@@ -29,8 +29,7 @@ class ValkyriePDController(VectorSystem):
         self.nv = tree.get_num_velocities()
         self.nu = tree.get_num_actuators()
 
-        self.nominal_state = RPYValkyrieFixedPointState()  # joint angles and torques for nominal position
-        self.tau_ff = RPYValkyrieFixedPointTorque()
+        self.nominal_state = RPYAtlasFixedPointState()  # joint angles and torques for nominal position
 
         self.tree = tree    # RigidBodyTree describing this robot
         self.plant = plant  # MultiBodyPlant describing this robot
@@ -73,18 +72,14 @@ class ValkyriePDController(VectorSystem):
 
         return (q,qd)
 
-    def ComputePDControl(self, q, qd, feedforward=True):
+    def ComputePDControl(self, q, qd):
         """
         Map state [q,qd] to control inputs [u].
         """
         q_nom = self.nominal_state[0:self.np]
         qd_nom = self.nominal_state[self.np:]
 
-        # compute torques to be applied in joint space
-        if feedforward:
-            tau = self.tau_ff + self.Kp*(q_nom-q) + self.Kd*(qd_nom - qd)
-        else:
-            tau = self.Kp*(q_nom-q) + self.Kd*(qd_nom - qd)
+        tau = self.Kp*(q_nom-q) + self.Kd*(qd_nom - qd)
 
         # Convert torques to actuator space
         B = self.tree.B
@@ -94,27 +89,27 @@ class ValkyriePDController(VectorSystem):
 
     def DoCalcVectorOutput(self, context, state, unused, output):
         q,qd = self.StateToQQDot(state)
+        u = self.ComputePDControl(q,qd)
 
-        u = self.ComputePDControl(q,qd,feedforward=True)
         output[:] = u
         
 
-class ValkyrieQPController(ValkyriePDController):
+class AtlasQPController(AtlasPDController):
     def __init__(self, tree, plant):
-        ValkyriePDController.__init__(self, tree, plant)
+        AtlasPDController.__init__(self, tree, plant)
 
-        self.fsm = WalkingFSM(n_steps=3,         # Finite State Machine describing CoM trajectory,
-                              step_length=0.60,   # swing foot trajectories, and stance phases.
-                              step_height=0.10,
-                              step_time=0.9)
-        #self.fsm = StandingFSM()
+        #self.fsm = WalkingFSM(n_steps=3,         # Finite State Machine describing CoM trajectory,
+        #                      step_length=0.60,   # swing foot trajectories, and stance phases.
+        #                      step_height=0.10,
+        #                      step_time=0.9)
+        self.fsm = StandingFSM()
 
         self.mu = 0.2             # assumed friction coefficient
 
         self.mp = MathematicalProgram()  # QP that we'll use for whole-body control
 
-        self.right_foot_index = self.tree.FindBody('rightFoot').get_body_index()
-        self.left_foot_index = self.tree.FindBody('leftFoot').get_body_index()
+        self.right_foot_index = self.tree.FindBody('r_foot').get_body_index()
+        self.left_foot_index = self.tree.FindBody('l_foot').get_body_index()
         self.world_index = self.tree.world().get_body_index()
 
     def get_foot_contact_points(self):
@@ -278,9 +273,8 @@ class ValkyrieQPController(ValkyriePDController):
 
     def SolveWholeBodyQP(self, cache, xdd_com_des, hd_com_des, xdd_left_des, xdd_right_des, qdd_des, support="double"):
         """
-        Formulates and solves a quadratic program which attempts to regulate the joints to the desired
+        Formulates a quadratic program which attempts to regulate the joints to the desired
         accelerations and center of mass to the desired position as follows:
-
         minimize:
             w_1* || J_com*qdd + Jd_com*qd - xdd_com_des ||^2 + 
             w_2* || A*qdd + Ad*qd - hd_com_des ||^2 +
@@ -288,29 +282,30 @@ class ValkyrieQPController(ValkyriePDController):
             w_4* || J_left*qdd + Jd_left*qd - xdd_left_des ||^2 +
             w_4* || J_right*qdd + Jd_right*qd - xdd_right_des ||^2 +
         subject to:
+            
                 H*qdd + C = B*tau + sum(J'*f)
                 f \in friction cones
                 J_cj*qdd + J'_cj*qd == nu
                 nu_min <= nu <= nu_max
-
         Parameters:
             cache         : kinematics cache for computing dynamic quantities
             xdd_com_des   : desired center of mass acceleration
             hd_com_des    : desired centroidal momentum dot
-            xdd_left_des  : desired accelerations of the left foot contact points
-            xdd_right_des : desired accelerations of the right foot contact points
+            xdd_left_des  : desired acceleration of the left foot
+            xdd_right_des : desired acceleration of the right foot
             qdd_des       : desired joint acceleration
             support       : what stance phase we're in. "double", "left", or "right"
         """
 
         self.mp = MathematicalProgram()
+
         
         ############## Tuneable Paramters ################
 
         w1 = 50.0   # center-of-mass tracking weight
-        w2 = 0.1  # centroid momentum weight
+        w2 = 0.02  # centroid momentum weight
         w3 = 0.5   # joint tracking weight
-        w4 = 50.0    # foot tracking weight
+        w4 = 5.0    # foot tracking weight
 
         nu_min = -0.001   # slack for contact constraint
         nu_max = 0.001
@@ -379,11 +374,10 @@ class ValkyrieQPController(ValkyriePDController):
         # Friction cone (really pyramid) constraints 
         friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
 
-        # Solve the QP
+        # Solve the whole-body QP
         result = Solve(self.mp)
 
         assert result.is_success()
-
         return result.GetSolution(tau)
 
 
@@ -394,8 +388,8 @@ class ValkyrieQPController(ValkyriePDController):
 
         ############## Tuneable Paramters ################
 
-        Kp_q = 100     # Joint angle PD gains
-        Kd_q = 10
+        Kp_q = 10     # Joint angle PD gains
+        Kd_q = 100
 
         Kp_com = 500   # Center of mass PD gains
         Kd_com = 50
@@ -422,17 +416,16 @@ class ValkyrieQPController(ValkyriePDController):
         x_com = self.tree.centerOfMass(cache)[np.newaxis].T
         xd_com = np.dot(self.tree.centerOfMassJacobian(cache), qd)[np.newaxis].T
         x_com_nom, xd_com_nom, xdd_com_nom = self.fsm.ComTrajectory(context.get_time())
-      
+       
         xdd_com_des = xdd_com_nom + Kp_com*(x_com_nom-x_com) + Kd_com*(xd_com_nom-xd_com)
+
+        print(x_com_nom-x_com)
 
         # Compute desired centroid momentum dot
         A_com = self.tree.centroidalMomentumMatrix(cache)
         Ad_com_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
         h_com = np.dot(A_com, qd)[np.newaxis].T
-
-        m = self.tree.massMatrix(cache)[0,0]  # total mass
-        h_com_nom = np.vstack([np.zeros((3,1)),m*xd_com_nom])  # desired angular velocity is zero,
-                                                               # CoM velocity matches the CoM trajectory
+        h_com_nom = np.zeros((6,1))
         hd_com_des = Kp_h*(h_com_nom - h_com)
 
         # Computed desired accelerations of the feet (at the corner points)
@@ -443,6 +436,7 @@ class ValkyrieQPController(ValkyriePDController):
 
         # Specify support phase
         support = self.fsm.SupportPhase(context.get_time())
+
 
         # Solve the whole-body QP to get desired torques
         u = self.SolveWholeBodyQP(cache, xdd_com_des, hd_com_des, xdd_left_des, xdd_right_des, qdd_des, support)

@@ -16,8 +16,7 @@ class StandingFSM(object):
     A finite state machine describing simply standing in double support at the given position.
     """
     def __init__(self):
-        self.x_com_init = np.asarray([[0.0074], [0.0], [0.967]])
-
+        self.x_com_init = np.asarray([[0.0], [0.0], [1.1]])
         self.x_right_init = np.asarray([[-0.071], [-0.138], [0.099]])
         self.x_left_init = np.asarray([[-0.071], [0.138], [0.099]])
 
@@ -31,7 +30,7 @@ class StandingFSM(object):
         """
         Return a desired center of mass position and velocity for the given timestep
         """
-        x_com = pycopy(self.x_com_init)
+        x_com = self.x_com_init
         xd_com = np.array([[0.0],[0.0],[0.0]])
         xdd_com = np.array([[0.0],[0.0],[0.0]])
         return (x_com, xd_com, xdd_com)
@@ -42,7 +41,7 @@ class StandingFSM(object):
         """
         x_right = pycopy(self.x_right_init)
         xd_right = np.array([[0.0],[0.0],[0.0]])
-        return (pycopy(x_right), pycopy(xd_right))
+        return (x_right, xd_right)
     
     def LeftFootTrajectory(self, time):
         """
@@ -51,6 +50,7 @@ class StandingFSM(object):
         x_left = pycopy(self.x_left_init)
         xd_left = np.array([[0.0],[0.0],[0.0]])
         return (x_left, xd_left)
+
 
 class WalkingFSM(object):
     """
@@ -71,7 +71,7 @@ class WalkingFSM(object):
         self.total_time = self.step_time*self.n_phases  
 
         # initial CoM and foot positions
-        self.x_com_init = np.asarray([[0.0074], [0.0], [0.967]])
+        self.x_com_init = np.asarray([[0.0074], [0.0], [1.1]])
         self.xd_com_init = np.asarray([[0.0], [0.0], [0.0]])
 
         self.x_right_init = np.asarray([[-0.071], [-0.138], [0.099]])
@@ -403,7 +403,7 @@ class WalkingFSM(object):
         """
         x_right = self.right_foot_trajectory.value(time)
         xd_right = self.right_foot_trajectory.derivative(1).value(time)
-        
+
         return (x_right, xd_right)
     
     def LeftFootTrajectory(self, time):

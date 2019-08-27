@@ -18,46 +18,49 @@ def list_joints_and_actuators(robot):
 
         print("Actuator [%s] acts on joint [%s]" % (joint_actuator.name(),joint.name()))
 
-def ValkyrieFixedPointState():
+def AtlasFixedPointState():
     """
-    Return a reasonable initial state for the Valkyrie humanoid, where
+    Return a reasonable initial state for the Atlas humanoid, where
     the orientation is expressed in quaternions.
     """
 
-    q = np.zeros(37)
-    q[0:4] = [1, 0, 0, 0]   # floating base orientation
-    q[4:7] = [0, 0, 1.025]  # floating base position
-    q[7] = 0                # spine
-    q[8] = 0                # r hip
-    q[9] = 0                # l hip
-    q[10] = 0               # spine
-    q[11] = 0               # r hip
-    q[12] = 0               # l hip
-    q[13] = 0               # spine
-    q[14] = -0.49           # r hip
-    q[15] = -0.49           # l hip
-    q[16] = 0               # neck
-    q[17] = 0.3             # r shoulder
-    q[18] = 0.3             # l shoulder
-    q[19] = 1.205           # r knee
-    q[20] = 1.205           # l knee
-    q[21] = 1.25            # r shoulder 
-    q[22] = -1.25           # l shoulder
-    q[23] = -0.71           # r ancle
-    q[24] = -0.71           # l ancle
-    q[25] = 0               # r elbow
-    q[26] = 0               # l elbow
-    q[27] = 0               # r ancle
-    q[28] = 0               # l ancle
-    q[29] = 0.78            # r elbow
-    q[30] = -0.78           # l elbow
-    q[31] = 1.571           # r wrist
-    q[32] = 1.571           # l wrist
-    q[33] = 0               # r wrist
-    q[34] = 0               # l wrist
-    q[35] = 0               # r wrist
-    q[36] = 0               # l wrist
-
+    q = np.array([1,#9.28905836e-01,
+                    0,#2.39236370e-03,
+                    0,#-3.70963058e-01,
+                    0,#4.98080637e-03,
+                    0,#6.48422542e-02,
+                    0,#1.95888551e-04,
+                    0.75,#7.29813908e-01,
+                    -2.27744518e-02,
+                    -3.45599963e-02,
+                    1.76481589e-02,
+                    0,#+8.13731964e-01,
+                    -2.83443570e-02,
+                    9.34774007e-03,
+                    -2.30525571e-02,
+                    -0.65,#2.09538752e-01,
+                    -0.65,#2.13166012e-01,
+                    -3.33203785e-02,
+                    -5.43372997e-01,
+                    4.61125916e-02,
+                    1.34741595e+00,
+                    1.34665731e+00,
+                    -4.19148641e-01,
+                    4.47254631e-01,
+                    -0.7,#-7.95624277e-01,
+                    -0.7,#7.97017894e-01,
+                    2.43621698e-01,
+                    2.40396297e-01,
+                    -4.01813646e-03,
+                    4.65558086e-03,
+                    4.66228967e-01,
+                    -4.81489651e-01,
+                    -3.00416436e-02,
+                    -3.36320600e-02,
+                    1.66319502e-02,
+                    -1.16896875e-02,
+                    -4.90277381e-03,
+                    -4.59190158e-03])
     qd = np.zeros(36)
 
     return np.hstack((q,qd))
@@ -77,46 +80,21 @@ def MBP_RBT_joint_angle_map(multi_body_plant, rigid_body_tree):
 
     return(X)
 
-def RPYValkyrieFixedPointTorque():
-    """
-    Return a set of torque commands that will keep the Valkyrie
-    humanoid (approximately) fixed at the above initial state.
-    
-    Adopted from drake/examples/valkyrie/valkyrie_constants.cc.
-    """
-    tau = np.asarray([
-      0, 0, 0, 0, 0, 0,
-      0, 54.07374714, -1.16973414,
-      1.89429714, 
-      
-      3.778290679, -8.104844333, -1.370804286, 
-      2.345797901, -0.3205054571, -0.2609708356, -0.1427544212, 
-      
-      3.778290679, 8.104844333, -1.370804286, 
-      -2.345797901, -0.3205054571, 0.2609708356, 0.1427544212,
-      
-      0.0009084321844, 12.02429585, -10.18358769, -118.6322523, 52.87796422, 0.2418568986, 
-      0.0009084320108, -11.43386868, -10.22606335, -116.9452938, 52.24348208, 0.2418569007])
 
-    return tau
-
-def RPYValkyrieFixedPointState():
+def RPYAtlasFixedPointState():
     """
-    Return a reasonable initial state for the Valkyrie humanoid. 
-    Adopted from drake/examples/valkyrie/valkyrie_constants.cc.
+    Return a reasonable initial state for the Atlas humanoid. 
     """
-  
-    # First six variables are spatial position of the floating base (x,y,z,r,p,y).
-    # The next 30 variables are joint angles.
-    q = np.asarray([
-            0, 0, 1.025, 0, 0, 0,      \
-            0, 0, 0, 0, 0.300196631343025, 1.25, 0, 0.785398163397448, \
-            1.571, 0, 0, 0.300196631343025, -1.25, 0, -0.785398163397448, \
-            1.571, 0, 0, 0, 0, -0.49, 1.205, -0.71, 0, 0, 0, -0.49, 1.205, -0.71, 0])
- 
-    # The first six variables are spatial velocities of the floating base.
-    # The next 30 variables are joint velocities.
-    qd = np.zeros(len(q))
+    q = np.asarray([6.48422542e-02,  1.95888551e-04,  7.29813908e-01,  1.03295189e-03,
+        -7.59904053e-01,  1.03114091e-02, -2.27744518e-02,  8.13731964e-01,
+        -2.30525571e-02, -3.33203785e-02, -3.45599963e-02, -2.83443570e-02,
+        2.09538752e-01,  1.34741595e+00, -7.95624277e-01, -4.01813646e-03,
+        -4.19148641e-01,  2.43621698e-01,  4.66228967e-01, -3.00416436e-02,
+        1.66319502e-02, -4.90277381e-03,  4.61125916e-02,  1.76481589e-02,
+        9.34774007e-03,  2.13166012e-01,  1.34665731e+00, -7.97017894e-01,
+        4.65558086e-03,  4.47254631e-01,  2.40396297e-01, -4.81489651e-01,
+        -3.36320600e-02, -1.16896875e-02, -4.59190158e-03, -5.43372997e-01])
+    qd = np.zeros(36)
 
     return np.hstack((q,qd))
 
