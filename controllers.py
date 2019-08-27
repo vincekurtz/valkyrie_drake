@@ -268,9 +268,6 @@ class AtlasQPController(AtlasPDController):
 
         return self.mp.AddLinearConstraint(A=A,lb=lb,ub=ub,vars=x)
 
-
-
-
     def SolveWholeBodyQP(self, cache, xdd_com_des, hd_com_des, xdd_left_des, xdd_right_des, qdd_des, support="double"):
         """
         Formulates a quadratic program which attempts to regulate the joints to the desired

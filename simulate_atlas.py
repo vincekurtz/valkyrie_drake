@@ -7,10 +7,11 @@ import numpy as np
 
 # Load the atlas model from a urdf file
 robot_description_file = "drake/examples/atlas/urdf/atlas_minimal_contact.urdf"
+#robot_description_file = "drake/examples/atlas/urdf/atlas_convex_hull.urdf"
 robot_urdf = FindResourceOrThrow(robot_description_file)
 builder = DiagramBuilder()
 scene_graph = builder.AddSystem(SceneGraph())
-plant = builder.AddSystem(MultibodyPlant(time_step=5e-4))
+plant = builder.AddSystem(MultibodyPlant(time_step=1e-2))
 plant.RegisterAsSourceForSceneGraph(scene_graph)
 Parser(plant=plant).AddModelFromFile(robot_urdf)
 
@@ -72,13 +73,17 @@ plant_context = diagram.GetMutableSubsystemContext(plant, diagram_context)
 
 # Simulator setup
 simulator = Simulator(diagram, diagram_context)
-simulator.set_target_realtime_rate(0.2)
+simulator.set_target_realtime_rate(1.5)
 simulator.set_publish_every_time_step(False)
 
 # Set initial state
 state = plant_context.get_mutable_discrete_state_vector()
 initial_state_vec = AtlasFixedPointState()  # computes [q,v] for a reasonable starting position
 state.SetFromVector(initial_state_vec)
+
+# Use a different integrator to speed up simulation (default is RK3)
+integrator = RungeKutta2Integrator(diagram, 1e-2, diagram_context)
+simulator.reset_integrator(integrator)
 
 # Run the simulation
 simulator.Initialize()
