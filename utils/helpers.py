@@ -1,22 +1,25 @@
 ##
 #
-# Helper functions for simulating a Valkyrie humanoid. 
+# Helper functions related to simulating a Valkyrie Humanoid
 #
 ##
+
 import numpy as np
-import time
-from pydrake.all import *
 
-def list_joints_and_actuators(robot):
+def MBP_RBT_joint_angle_map(multi_body_plant, rigid_body_tree):
     """
-    Run through all the joints and actuators in the robot model 
-    and print their names and indeces.
+    Return a matrix X such that the joint angles (excluding floating base)
+    of the rigid-body tree can be given as q_RBT = X*q_MBT, where q_MBT is
+    the joint angles (excluding floating base) of the multi-body plant.
     """
-    for i in range(robot.num_actuators()):
-        joint_actuator = robot.get_joint_actuator(JointActuatorIndex(i))
-        joint = joint_actuator.joint()
+    assert multi_body_plant.num_actuators() == rigid_body_tree.get_num_actuators()
+    
+    B_rbt = rigid_body_tree.B
+    B_mbp = multi_body_plant.MakeActuationMatrix()
 
-        print("Actuator [%s] acts on joint [%s]" % (joint_actuator.name(),joint.name()))
+    X = np.dot(B_rbt[6:,:],B_mbp[6:,:].T)
+
+    return(X)
 
 def ValkyrieFixedPointState():
     """
@@ -61,21 +64,6 @@ def ValkyrieFixedPointState():
     qd = np.zeros(36)
 
     return np.hstack((q,qd))
-
-def MBP_RBT_joint_angle_map(multi_body_plant, rigid_body_tree):
-    """
-    Return a matrix X such that the joint angles (excluding floating base)
-    of the rigid-body tree can be given as q_RBT = X*q_MBT, where q_MBT is
-    the joint angles (excluding floating base) of the multi-body plant.
-    """
-    assert multi_body_plant.num_actuators() == rigid_body_tree.get_num_actuators()
-    
-    B_rbt = rigid_body_tree.B
-    B_mbp = multi_body_plant.MakeActuationMatrix()
-
-    X = np.dot(B_rbt[6:,:],B_mbp[6:,:].T)
-
-    return(X)
 
 def RPYValkyrieFixedPointTorque():
     """

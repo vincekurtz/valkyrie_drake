@@ -1,8 +1,8 @@
 #!/usr/bin/env python2
 
 from pydrake.all import *
-from helpers import *
-from controllers import *
+from utils.helpers import ValkyrieFixedPointState
+from controllers import ValkyriePDController, ValkyrieQPController
 import numpy as np
 
 # Load the valkyrie model from a urdf file
