@@ -6,6 +6,24 @@
 
 import numpy as np
 
+def get_total_mass(tree):
+    """
+    Return the total mass for a given RigidBodyTree
+    """
+    m = 0
+    for body in tree.get_bodies():
+        spatial_inertia = body.get_spatial_inertia()
+        body_mass = spatial_inertia[-1,-1]
+        m += body_mass
+    return m
+
+def is_pos_def(matrix):
+    """
+    Return true if the given matrix (2d numpy array) is positive
+    definite.
+    """
+    return np.all(np.linalg.eigvals(matrix) > 0)
+
 def MBP_RBT_joint_angle_map(multi_body_plant, rigid_body_tree):
     """
     Return a matrix X such that the joint angles (excluding floating base)

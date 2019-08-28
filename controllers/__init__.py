@@ -1,2 +1,3 @@
 from pd_controller import ValkyriePDController
 from qp_controller import ValkyrieQPController
+from as_controller import ValkyrieASController
