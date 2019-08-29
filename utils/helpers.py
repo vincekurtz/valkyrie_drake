@@ -4,7 +4,70 @@
 #
 ##
 
+import time
 import numpy as np
+import cdd
+
+def face_to_span(A):
+    """
+    Convert a polyhedral cone from face form
+
+        C = {x | Ax <= 0}
+
+    to span form
+
+        C = {Vz | z >= 0}.
+    """
+    # H-representation [b -A], where Ax <= b
+    H = np.hstack([np.zeros((A.shape[0],1)),-A])
+
+    mat = cdd.Matrix(H, number_type='float')
+    mat.rep_type = cdd.RepType.INEQUALITY
+    P = cdd.Polyhedron(mat)
+
+    # V-representation [t V], where t=0 for rays
+    g = P.get_generators()
+    tV = np.array(g)
+
+    assert np.all(tV[:,0] == 0), "Not a cone!"
+
+    rays = []
+    for i in range(tV.shape[0]):
+        if i not in g.lin_set:
+            rays.append(tV[i,1:])
+    V = np.asarray(rays).T
+
+    return V
+
+def span_to_face(V):
+    """
+    Convert a polyhedral cone from span form
+
+        C = {Vz | z >= 0}.
+
+    to face form
+        
+        C = {x | Ax <= 0}
+    """
+    # V-representation [t V], where t=0 for rays
+    tV = np.hstack([np.zeros((V.shape[1],1)),V.T])
+    
+    mat = cdd.Matrix(tV, number_type='float')
+    mat.rep_type = cdd.RepType.GENERATOR
+    P = cdd.Polyhedron(mat)
+
+    # H-representation [b -A], where Ax <= b
+    ineq = P.get_inequalities()
+    H = np.array(ineq)
+
+    #assert np.all(H[:,0] == 0), "Ax <= b, but b is nonzero!"
+
+    A = []
+    for i in xrange(H.shape[0]):
+        if i not in ineq.lin_set:
+            A.append(-H[i,1:])
+
+    return np.asarray(A)
 
 def get_total_mass(tree):
     """
