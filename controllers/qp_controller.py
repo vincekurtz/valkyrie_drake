@@ -30,10 +30,10 @@ class ValkyrieQPController(ValkyriePDController):
         (this is a rough guess based on self.tree.getTerrainContactPoints)
         """
         corner_contacts = (
-                            np.array([-0.069, 0.08, -0.09]),
-                            np.array([-0.069,-0.08, -0.09]),
-                            np.array([ 0.201,-0.08, -0.09]),
-                            np.array([ 0.201, 0.08, -0.09])
+                            np.array([-0.069, 0.08, -0.099]),
+                            np.array([-0.069,-0.08, -0.099]),
+                            np.array([ 0.201,-0.08, -0.099]),
+                            np.array([ 0.201, 0.08, -0.099])
                           )
 
         return corner_contacts
@@ -103,6 +103,8 @@ class ValkyrieQPController(ValkyriePDController):
             x_left_nom, xd_left_nom = self.fsm.LeftFootTrajectory(time)
             x_left_nom += corner_point[np.newaxis].T
 
+            print(x_left_nom-x_left)
+
             xdd_left_des.append( Kp*(x_left_nom-x_left) + Kd*(xd_left_nom - xd_left) )
             
             # Right foot
@@ -114,6 +116,7 @@ class ValkyrieQPController(ValkyriePDController):
             x_right_nom += corner_point[np.newaxis].T
 
             xdd_right_des.append( Kp*(x_right_nom-x_right) + Kd*(xd_right_nom - xd_right) )
+        print("")
 
         return (xdd_left_des, xdd_right_des)
 
@@ -219,8 +222,8 @@ class ValkyrieQPController(ValkyriePDController):
         w3 = 0.5   # joint tracking weight
         w4 = 50.0    # foot tracking weight
 
-        nu_min = -0.001   # slack for contact constraint
-        nu_max = 0.001
+        nu_min = -1e-10   # slack for contact constraint
+        nu_max = 1e-10
         
         ##################################################
 
@@ -310,7 +313,7 @@ class ValkyrieQPController(ValkyriePDController):
         Kp_h = 10.0    # Centroid momentum P gain
 
         Kp_foot = 100.0   # foot position PD gains
-        Kd_foot = 100.0 
+        Kd_foot = 10.0 
 
         ##################################################
 

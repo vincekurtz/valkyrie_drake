@@ -265,6 +265,9 @@ class WalkingFSM(object):
         # Knot points are positions of the right and left feet at the break times
         lf_knots = np.zeros((3,len(break_times)))
         rf_knots = np.zeros((3,len(break_times)))
+        
+        lf_dot_knots = np.zeros((3,len(break_times)))
+        rf_dot_knots = np.zeros((3,len(break_times)))
 
         lf_idx = 0
         rf_idx = 0
@@ -276,6 +279,9 @@ class WalkingFSM(object):
                 rf_ref = pycopy(self.right_foot_placements[rf_idx])
                 rf_ref[0] += self.step_length/2  # move the foot forward to the midpoint of the stride
                 rf_ref[2] += self.step_height    # and up the designated hight
+
+                # Slight forward velocity of the swing foot
+                rf_dot_knots[0,i] = self.step_length/self.step_time
 
                 # Next setpoint will be at the next foot placement
                 rf_idx += 1
@@ -291,6 +297,9 @@ class WalkingFSM(object):
 
                 # Next setpoint will be at the next foot placement
                 lf_idx += 1
+                
+                # Slight forward velocity of the swing foot
+                lf_dot_knots[0,i] = self.step_length/self.step_time
 
                 # right foot remains at the same place
                 rf_ref = self.right_foot_placements[rf_idx]
@@ -303,8 +312,10 @@ class WalkingFSM(object):
             rf_knots[:,i] = rf_ref[:,0]
 
         # Perform piecewise linear interpolation
-        self.left_foot_trajectory = PiecewisePolynomial.FirstOrderHold(break_times,lf_knots)
-        self.right_foot_trajectory = PiecewisePolynomial.FirstOrderHold(break_times,rf_knots)
+        #self.left_foot_trajectory = PiecewisePolynomial.FirstOrderHold(break_times,lf_knots)
+        #self.right_foot_trajectory = PiecewisePolynomial.FirstOrderHold(break_times,rf_knots)
+        self.left_foot_trajectory = PiecewisePolynomial.Cubic(break_times,lf_knots,lf_dot_knots)
+        self.right_foot_trajectory = PiecewisePolynomial.Cubic(break_times,rf_knots,rf_dot_knots)
 
     def SupportPhase(self, time):
         """
