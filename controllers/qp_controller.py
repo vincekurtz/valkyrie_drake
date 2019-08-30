@@ -16,7 +16,7 @@ class ValkyrieQPController(ValkyriePDController):
                               step_time=0.9)
         #self.fsm = StandingFSM()
 
-        self.mu = 0.2             # assumed friction coefficient
+        self.mu = 0.7             # assumed friction coefficient
 
         self.mp = MathematicalProgram()  # QP that we'll use for whole-body control
 
@@ -103,8 +103,6 @@ class ValkyrieQPController(ValkyriePDController):
             x_left_nom, xd_left_nom = self.fsm.LeftFootTrajectory(time)
             x_left_nom += corner_point[np.newaxis].T
 
-            print(x_left_nom-x_left)
-
             xdd_left_des.append( Kp*(x_left_nom-x_left) + Kd*(xd_left_nom - xd_left) )
             
             # Right foot
@@ -116,7 +114,6 @@ class ValkyrieQPController(ValkyriePDController):
             x_right_nom += corner_point[np.newaxis].T
 
             xdd_right_des.append( Kp*(x_right_nom-x_right) + Kd*(xd_right_nom - xd_right) )
-        print("")
 
         return (xdd_left_des, xdd_right_des)
 
@@ -168,10 +165,10 @@ class ValkyrieQPController(ValkyriePDController):
         """
         num_contacts = len(f_contact)
 
-        A_i = np.asarray([[ 1, 1, -self.mu],   # pyramid approximation of CWC for one
-                          [-1, 1, -self.mu],   # contact force f \in R^3
-                          [-1,-1, -self.mu],
-                          [ 1,-1, -self.mu]])
+        A_i = np.asarray([[ 1, 0, -self.mu],   # pyramid approximation of CWC for one
+                          [-1, 0, -self.mu],   # contact force f \in R^3
+                          [ 0, 1, -self.mu],
+                          [ 0,-1, -self.mu]])
 
         # We'll formulate as lb <= Ax <= ub, where x=[f_1',f_2',...]'
         A = np.kron(np.eye(num_contacts),A_i)
