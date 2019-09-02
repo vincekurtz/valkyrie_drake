@@ -16,6 +16,10 @@ class ValkyrieASController(ValkyrieQPController):
 
         # Finite state machine defining desired ZMP trajectory,
         # foot placements, and swing foot trajectories.
+        #self.fsm = WalkingFSM(n_steps=3,
+        #                      step_length=0.6,
+        #                      step_height=0.1,
+        #                      step_time=0.9)
         self.fsm = StandingFSM()
 
         # Parameters
@@ -49,33 +53,23 @@ class ValkyrieASController(ValkyrieQPController):
         # between the template and the anchor
         interface_mp = MathematicalProgram()
         
-        lmbda = 1.0
-        Mbar = interface_mp.NewSymmetricContinuousVariables(9,"Mbar")
-
-        Q_task = 1000*np.eye(9)
+        Q_task = np.eye(9)
         R_task = np.eye(6)
         K, P = LinearQuadraticRegulator(self.A_task, self.B_task, Q_task, R_task)
-        Kbar = np.dot(-K,Mbar)
-        #Kbar = interface_mp.NewContinuousVariables(6,9,"Kbar")
-   
-        constraint_matrix_one = np.vstack([
-                                    np.hstack([Mbar,                     np.dot(Mbar,self.C_task.T)]),
-                                    np.hstack([np.dot(self.C_task,Mbar), np.eye(9)                 ])
-                                ])
-        interface_mp.AddPositiveSemidefiniteConstraint(constraint_matrix_one)
+        self.K = -K
 
-        constraint_matrix_two = -2*lmbda*Mbar - np.dot(Mbar,self.A_task.T) - np.dot(self.A_task,Mbar) \
-                                        - np.dot(Kbar.T,self.B_task.T) - np.dot(self.B_task,Kbar)
-        interface_mp.AddPositiveSemidefiniteConstraint(constraint_matrix_two)
+        lmbda = 0.001
+        M = interface_mp.NewSymmetricContinuousVariables(9,"M")
+
+        interface_mp.AddPositiveSemidefiniteConstraint(M - np.dot(self.C_task.T, self.C_task))
+
+        AplusBK = self.A_task + np.dot(self.B_task, self.K)
+        interface_mp.AddPositiveSemidefiniteConstraint(-2*lmbda*M - np.dot(AplusBK.T,M) - np.dot(M,AplusBK) )
 
         result = Solve(interface_mp)
-        assert result.is_success()
-        Mbar = result.GetSolution(Mbar)
-        Kbar = result.GetSolution(Kbar)
 
-        self.M = np.linalg.inv(Mbar)
-        self.K = -K
-        print(self.K)
+        assert result.is_success(), "Interface SDP infeasible"
+        self.M = result.GetSolution(M)
 
         self.P = self.C_lip
 
@@ -86,7 +80,7 @@ class ValkyrieASController(ValkyrieQPController):
         self.R[3:5] = -m*omega**2*np.eye(2)
 
         # Double check the results
-        #assert is_pos_def(self.M) , "M is not positive definite."
+        assert is_pos_def(self.M) , "M is not positive definite."
         assert is_pos_def(-self.A_task-np.dot(self.B_task,self.K)) , "A+BK is not Hurwitz"
 
         assert is_pos_def(self.M - np.dot(self.C_task.T,self.C_task)) , "Failed test M >= C'C"
@@ -123,6 +117,36 @@ class ValkyrieASController(ValkyrieQPController):
 
         return np.vstack([p_com, h_com])
 
+    def ComputeGIWC(self):
+        """
+        Compute the Gravito Intertial Wrench Cone for the current stance
+
+            A f_{com} <= 0,
+
+        where f_{com} is the wrench on the center of mass expressed in the 
+        world frame. 
+        """
+        #TODO
+        A = None
+        return A
+
+    def ComputeLinearizedContactConstraint(self):
+        """
+        Compute the linearized contact constraint
+
+            A_cwc*[x_task] <= b_{cwc}
+                  [u_task]
+
+        for the current stance, based on linearizing the bilinear GIWC constraint
+        based on bounding the CoM acceleration.
+        """
+        #TODO
+        A_cwc = None
+        b_cwc = None
+
+        return A_cwc, b_cwc
+         
+
     def DoTemplateMPC(self, x_lip, x_task):
         """
         Given the current template (x_lip) and task space (x_task) states, perform MPC
@@ -142,21 +166,16 @@ class ValkyrieASController(ValkyrieQPController):
 
         ############## Tuneable Paramters ################
 
-        Kp_q = 100     # Joint angle PD gains
-        Kd_q = 10
-
-        Kp_com = 500   # Center of mass PD gains
-        Kd_com = 50
-
-        Kp_h = 10.0    # Centroid momentum P gain
+        Kp_q = 1     # Joint angle PD gains
+        Kd_q = 1
 
         Kp_foot = 100.0   # foot position PD gains
         Kd_foot = 100.0 
+        
+        Kd_contact = 10.0  # Contact movement damping P gain
 
-        w1 = 50.0   # center-of-mass tracking weight
-        w2 = 0.1  # centroid momentum weight
-        w3 = 0.5   # joint tracking weight
-        w4 = 50.0    # foot tracking weight
+        w1 = 0.5   # joint tracking weight
+        w2 = 50.0    # foot tracking weight
 
         nu_min = -0.001   # slack for contact constraint
         nu_max = 0.001
@@ -168,21 +187,6 @@ class ValkyrieASController(ValkyrieQPController):
         qd_nom = self.nominal_state[self.np:]
         qdd_des = Kp_q*(q_nom-q) + Kd_q*(qd_nom-qd)
         qdd_des = qdd_des[np.newaxis].T
-
-        # Compute desired center of mass acceleration
-        x_com = self.tree.centerOfMass(cache)[np.newaxis].T
-        xd_com = np.dot(self.tree.centerOfMassJacobian(cache), qd)[np.newaxis].T
-        x_com_nom, xd_com_nom, xdd_com_nom = self.fsm.ComTrajectory(time)
-        xdd_com_des = xdd_com_nom + Kp_com*(x_com_nom-x_com) + Kd_com*(xd_com_nom-xd_com)
-
-        # Compute desired centroid momentum dot
-        hd_com_des = u_task
-        A_com = self.tree.centroidalMomentumMatrix(cache)
-        Ad_com_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
-        h_com = np.dot(A_com, qd)[np.newaxis].T
-        h_com_nom = np.vstack([np.zeros((3,1)),139*xd_com_nom])  # desired angular velocity is zero,
-                                                                    # CoM velocity matches the CoM trajectory
-        hd_com_des = Kp_h*(h_com_nom - h_com)
 
         # Computed desired accelerations of the feet (at the corner points)
         xdd_left_des, xdd_right_des = self.get_desired_foot_accelerations(cache, 
@@ -220,31 +224,29 @@ class ValkyrieASController(ValkyrieQPController):
        
         f_contact = [self.mp.NewContinuousVariables(3,1,'f_%s'%i) for i in range(num_contacts)]
 
-        # Center of mass tracking cost
-        com_cost = self.AddJacobianTypeCost(J_com, qdd, Jd_qd_com, xdd_com_des, weight=w1)
-
-        # Centroidal momentum cost
-        centroidal_cost = self.AddJacobianTypeCost(A, qdd, Ad_qd, hd_com_des, weight=w2)
-       
         # Joint tracking cost
-        joint_cost = self.mp.AddQuadraticErrorCost(Q=w3*np.eye(self.nv),x_desired=qdd_des,vars=qdd)
+        joint_cost = self.mp.AddQuadraticErrorCost(Q=w1*np.eye(self.nv),x_desired=qdd_des,vars=qdd)
 
         # Foot tracking costs: add a cost for each corner of the foot
         corners = self.get_foot_contact_points()
         for i in range(len(corners)):
             # Left foot tracking cost for this corner
             J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index, relative_position=corners[i])
-            self.AddJacobianTypeCost(J_left, qdd, Jd_qd_left, xdd_left_des[i], weight=w4)
+            self.AddJacobianTypeCost(J_left, qdd, Jd_qd_left, xdd_left_des[i], weight=w2)
 
             # Right foot tracking cost
             J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index, relative_position=corners[i])
-            self.AddJacobianTypeCost(J_right, qdd, Jd_qd_right, xdd_right_des[i], weight=w4)
+            self.AddJacobianTypeCost(J_right, qdd, Jd_qd_right, xdd_right_des[i], weight=w2)
             
+        # Centroidal momentum constraint
+        hd_com_des = u_task[:,0]
+        centroidal_constraint = self.AddJacobianTypeConstraint(A, qdd, Ad_qd, hd_com_des)
+       
         # Contact acceleration constraint
         for j in range(num_contacts):
             J_cont = contact_jacobians[j]
             Jd_qd_cont = contact_jacobians_dot_v[j]
-            xdd_cont_des = 0
+            xdd_cont_des = -Kd_contact*Jd_qd_cont
 
             contact_constraint = self.AddJacobianTypeConstraint(J_cont, qdd, Jd_qd_cont, xdd_cont_des)
  
@@ -256,10 +258,11 @@ class ValkyrieASController(ValkyrieQPController):
         dynamics_constraint = self.AddDynamicsConstraint(H, qdd, C, B, tau, contact_jacobians, f_contact)
 
         # Friction cone (really pyramid) constraints 
-        friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
+        #friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
 
         # Solve the QP
-        result = Solve(self.mp)
+        solver = OsqpSolver()
+        result = solver.Solve(self.mp,None,None)
         assert result.is_success(), "Whole-body QP Infeasible!"
         return result.GetSolution(tau)
 
@@ -275,9 +278,6 @@ class ValkyrieASController(ValkyrieQPController):
         # Compute the current template and task-space states
         x_lip =  self.x_lip
         x_task = self.GetTaskSpaceState(cache, q, qd)
-
-        print(np.dot(self.K, x_task))
-        print("")
 
         # Generate a template trajectory that respects whole-body CWC constraints
         u_lip, u_task = self.DoTemplateMPC(x_lip, x_task)

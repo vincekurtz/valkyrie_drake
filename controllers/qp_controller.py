@@ -183,7 +183,7 @@ class ValkyrieQPController(ValkyriePDController):
 
 
 
-    def SolveWholeBodyQP(self, cache, xdd_com_des, hd_com_des, xdd_left_des, xdd_right_des, qdd_des, support="double"):
+    def SolveWholeBodyQP(self, cache, context, q, qd):
         """
         Formulates and solves a quadratic program which attempts to regulate the joints to the desired
         accelerations and center of mass to the desired position as follows:
@@ -210,8 +210,6 @@ class ValkyrieQPController(ValkyriePDController):
             support       : what stance phase we're in. "double", "left", or "right"
         """
 
-        self.mp = MathematicalProgram()
-        
         ############## Tuneable Paramters ################
 
         w1 = 50.0   # center-of-mass tracking weight
@@ -221,85 +219,6 @@ class ValkyrieQPController(ValkyriePDController):
 
         nu_min = -1e-10   # slack for contact constraint
         nu_max = 1e-10
-        
-        ##################################################
-
-        # Compute dynamic quantities. Note that we cast vectors as nx1 numpy arrays to allow
-        # for matrix multiplication with np.dot().
-        H = self.tree.massMatrix(cache)                  # Equations of motion
-        C = self.tree.dynamicsBiasTerm(cache, {}, True)[np.newaxis].T
-        B = self.tree.B
-
-        A = self.tree.centroidalMomentumMatrix(cache)
-        Ad_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
-
-        J_com = self.tree.centerOfMassJacobian(cache)    # Center of mass jacobian
-        Jd_qd_com = self.tree.centerOfMassJacobianDotTimesV(cache)[np.newaxis].T
-       
-        J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index)  # foot jacobians
-        J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index)
-
-        contact_jacobians, contact_jacobians_dot_v = self.get_contact_jacobians(cache, support)
-        num_contacts = len(contact_jacobians)
-
-        # create optimization variables
-        qdd = self.mp.NewContinuousVariables(self.nv, 1, 'qdd')   # joint accelerations
-        tau = self.mp.NewContinuousVariables(self.nu, 1, 'tau')   # applied torques
-       
-        f_contact = [self.mp.NewContinuousVariables(3,1,'f_%s'%i) for i in range(num_contacts)]
-
-        # Center of mass tracking cost
-        com_cost = self.AddJacobianTypeCost(J_com, qdd, Jd_qd_com, xdd_com_des, weight=w1)
-
-        # Centroidal momentum cost
-        centroidal_cost = self.AddJacobianTypeCost(A, qdd, Ad_qd, hd_com_des, weight=w2)
-       
-        # Joint tracking cost
-        joint_cost = self.mp.AddQuadraticErrorCost(Q=w3*np.eye(self.nv),x_desired=qdd_des,vars=qdd)
-
-        # Foot tracking costs: add a cost for each corner of the foot
-        corners = self.get_foot_contact_points()
-        for i in range(len(corners)):
-            # Left foot tracking cost for this corner
-            J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index, relative_position=corners[i])
-            self.AddJacobianTypeCost(J_left, qdd, Jd_qd_left, xdd_left_des[i], weight=w4)
-
-            # Right foot tracking cost
-            J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index, relative_position=corners[i])
-            self.AddJacobianTypeCost(J_right, qdd, Jd_qd_right, xdd_right_des[i], weight=w4)
-            
-        # Contact acceleration constraint
-        for j in range(num_contacts):
-            J_cont = contact_jacobians[j]
-            Jd_qd_cont = contact_jacobians_dot_v[j]
-            xdd_cont_des = 0
-
-            contact_constraint = self.AddJacobianTypeConstraint(J_cont, qdd, Jd_qd_cont, xdd_cont_des)
- 
-            # add some slight flexibility to this constraint to avoid infeasibility
-            contact_constraint.evaluator().UpdateUpperBound(nu_max*np.array([1.0,1.0,1.0]))
-            contact_constraint.evaluator().UpdateLowerBound(nu_min*np.array([1.0,1.0,1.0]))
-       
-        # Dynamic constraints 
-        dynamics_constraint = self.AddDynamicsConstraint(H, qdd, C, B, tau, contact_jacobians, f_contact)
-
-        # Friction cone (really pyramid) constraints 
-        friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
-
-        # Solve the QP
-        result = Solve(self.mp)
-
-        assert result.is_success()
-
-        return result.GetSolution(tau)
-
-
-    def DoCalcVectorOutput(self, context, state, unused, output):
-        """
-        Map from the state (q,qd) to output torques.
-        """
-
-        ############## Tuneable Paramters ################
 
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
@@ -312,12 +231,9 @@ class ValkyrieQPController(ValkyriePDController):
         Kp_foot = 100.0   # foot position PD gains
         Kd_foot = 10.0 
 
+        Kd_contact = 10.0  # Contact movement damping P gain
+
         ##################################################
-
-        q, qd = self.StateToQQDot(state)
-
-        # Run kinematics, which will allow us to calculate key quantities
-        cache = self.tree.doKinematics(q, qd)
 
         # Compute desired joint acclerations
         q_nom = self.nominal_state[0:self.np]
@@ -351,7 +267,91 @@ class ValkyrieQPController(ValkyriePDController):
         # Specify support phase
         support = self.fsm.SupportPhase(context.get_time())
 
+        # Compute dynamic quantities. Note that we cast vectors as nx1 numpy arrays to allow
+        # for matrix multiplication with np.dot().
+        H = self.tree.massMatrix(cache)                  # Equations of motion
+        C = self.tree.dynamicsBiasTerm(cache, {}, True)[np.newaxis].T
+        B = self.tree.B
+
+        A = self.tree.centroidalMomentumMatrix(cache)
+        Ad_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
+
+        J_com = self.tree.centerOfMassJacobian(cache)    # Center of mass jacobian
+        Jd_qd_com = self.tree.centerOfMassJacobianDotTimesV(cache)[np.newaxis].T
+       
+        J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index)  # foot jacobians
+        J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index)
+
+        contact_jacobians, contact_jacobians_dot_v = self.get_contact_jacobians(cache, support)
+        num_contacts = len(contact_jacobians)
+
+        #################### QP Formulation ##################
+
+        self.mp = MathematicalProgram()
+        
+        # create optimization variables
+        qdd = self.mp.NewContinuousVariables(self.nv, 1, 'qdd')   # joint accelerations
+        tau = self.mp.NewContinuousVariables(self.nu, 1, 'tau')   # applied torques
+       
+        f_contact = [self.mp.NewContinuousVariables(3,1,'f_%s'%i) for i in range(num_contacts)]
+
+        # Center of mass tracking cost
+        com_cost = self.AddJacobianTypeCost(J_com, qdd, Jd_qd_com, xdd_com_des, weight=w1)
+
+        # Centroidal momentum cost
+        centroidal_cost = self.AddJacobianTypeCost(A, qdd, Ad_qd, hd_com_des, weight=w2)
+       
+        # Joint tracking cost
+        joint_cost = self.mp.AddQuadraticErrorCost(Q=w3*np.eye(self.nv),x_desired=qdd_des,vars=qdd)
+
+        # Foot tracking costs: add a cost for each corner of the foot
+        corners = self.get_foot_contact_points()
+        for i in range(len(corners)):
+            # Left foot tracking cost for this corner
+            J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index, relative_position=corners[i])
+            self.AddJacobianTypeCost(J_left, qdd, Jd_qd_left, xdd_left_des[i], weight=w4)
+
+            # Right foot tracking cost
+            J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index, relative_position=corners[i])
+            self.AddJacobianTypeCost(J_right, qdd, Jd_qd_right, xdd_right_des[i], weight=w4)
+            
+        # Contact acceleration constraint
+        for j in range(num_contacts):
+            J_cont = contact_jacobians[j]
+            Jd_qd_cont = contact_jacobians_dot_v[j]
+            xdd_cont_des = -Kd_contact*Jd_qd_cont
+
+            contact_constraint = self.AddJacobianTypeConstraint(J_cont, qdd, Jd_qd_cont, xdd_cont_des)
+ 
+            # add some slight flexibility to this constraint to avoid infeasibility
+            contact_constraint.evaluator().UpdateUpperBound(nu_max*np.array([1.0,1.0,1.0]))
+            contact_constraint.evaluator().UpdateLowerBound(nu_min*np.array([1.0,1.0,1.0]))
+       
+        # Dynamic constraints 
+        dynamics_constraint = self.AddDynamicsConstraint(H, qdd, C, B, tau, contact_jacobians, f_contact)
+
+        # Friction cone (really pyramid) constraints 
+        friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
+
+        # Solve the QP
+        result = Solve(self.mp)
+
+        assert result.is_success()
+
+        return result.GetSolution(tau)
+
+
+    def DoCalcVectorOutput(self, context, state, unused, output):
+        """
+        Map from the state (q,qd) to output torques.
+        """
+        
+        q, qd = self.StateToQQDot(state)
+
+        # Run kinematics, which will allow us to calculate key quantities
+        cache = self.tree.doKinematics(q, qd)
+
         # Solve the whole-body QP to get desired torques
-        u = self.SolveWholeBodyQP(cache, xdd_com_des, hd_com_des, xdd_left_des, xdd_right_des, qdd_des, support)
+        u = self.SolveWholeBodyQP(cache, context, q, qd)
 
         output[:] = u
