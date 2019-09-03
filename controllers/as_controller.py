@@ -28,6 +28,9 @@ class ValkyrieASController(ValkyrieQPController):
         omega = np.sqrt(g/h)
         m = get_total_mass(tree)
 
+        # Spatial force on the CoM due to gravity
+        self.f_mg = np.array([0,0,0,0,0,m*g])[np.newaxis].T
+
         # Define template (LIPM) dynamics
         self.A_lip = np.zeros((4,4))
         self.A_lip[0:2,2:4] = np.eye(2)
@@ -99,6 +102,17 @@ class ValkyrieASController(ValkyrieQPController):
                                [0.0],   # x velocity
                                [0.0]])  # y velocity
 
+    def comForceTransform(self, cache):
+        """
+        Returns the 6x6 matrix O_Xf_com that transforms
+        forces in the center of mass frame to the world frame
+        """
+        p_com = self.tree.centerOfMass(cache).flatten()
+        O_Xf_com = np.eye(6)
+        O_Xf_com[0:3,3:6] = S(p_com)
+
+        return O_Xf_com
+
     def GetTaskSpaceState(self, cache, q, qd):
         """
         Compute the current task-space state
@@ -117,7 +131,7 @@ class ValkyrieASController(ValkyrieQPController):
 
         return np.vstack([p_com, h_com])
 
-    def ComputeGIWC(self):
+    def ComputeGIWC(self, support, t):
         """
         Compute the Gravito Intertial Wrench Cone for the current stance
 
@@ -126,9 +140,70 @@ class ValkyrieASController(ValkyrieQPController):
         where f_{com} is the wrench on the center of mass expressed in the 
         world frame. 
         """
-        #TODO
-        A = None
-        return A
+        # Friction pyramid for forces at each vertex of each contact surface
+        # A_vertex*f_vertex <= 0 ensures Coulomb friction is obeyed
+        A_vertex = np.array([[ 1.0, 0.0, -self.mu],
+                             [-1.0, 0.0, -self.mu],
+                             [ 0.0, 1.0, -self.mu],
+                             [ 0.0,-1.0, -self.mu]])
+
+        # Net friction cone for forces f_all = [f_vertex_1, f_vertex_2,...]' 
+        # at four vertices of each contact surface.
+        # A_all*f_all <= 0 ensures Coulomb friction is obeyed
+        A_all = np.kron(np.eye(4),A_vertex)
+
+        # Surface wrench w_surf = [f_surf, tau_surf]' resulting from f_all
+        # w_surf = G_surf*f_all
+        G_surf = np.zeros((6,12))
+
+        G_surf[0:3,:] = np.hstack([np.eye(3),np.eye(3),np.eye(3),np.eye(3)])  # sum of forces
+
+        p1,p2,p3,p4 = self.get_foot_contact_points() # sum of torques
+        G_surf[3:6,0:3] = S(p1)                        
+        G_surf[3:6,3:6] = S(p4)
+        G_surf[3:6,6:9] = S(p2)
+        G_surf[3:6,9:12] = S(p3)
+
+        # Get foot (contact) positions in the world frame
+        rf_pos, rf_vel = self.fsm.RightFootTrajectory(t)
+        lf_pos, lf_vel = self.fsm.LeftFootTrajectory(t)
+        
+        # Centroidal wrench w_GI = G_stance*w_all, where w_all = [w_surf_1, w_surf_2, ...]'
+        # G_stance = [ -R     ,0  ]
+        #            [ -S(p)*R, -R]
+        if support == "right":
+            # We'll assume contacts are not rotated in the world frame, so R = eye(3)
+            G_stance = -np.eye(6)
+            G_stance[3:6,0:3] = -S(rf_pos.flatten())
+        elif support == "left":
+            G_stance = -np.eye(6)
+            G_stance[3:6,0:3] = -S(lf_pos.flatten())
+        elif support == "double":
+            # w_GI = G_stance_right*w_right + G_stance_left*w_left
+            G_stance = np.zeros((6,12))
+            G_stance[0:6,0:6] = -np.eye(6)
+            G_stance[3:6,0:3] = -S(rf_pos.flatten())
+            G_stance[0:6,6:12] = -np.eye(6)
+            G_stance[3:6,6:9] = -S(lf_pos.flatten())
+        else:
+            raise ValueError("Unknown support mode '%s'." % support)
+
+        # Use cone double description to get vertex constraints in span form
+        V_all = face_to_span(A_all)
+
+        # Compute surfance wrench cone in span form
+        V_surf = np.dot(G_surf, V_all)
+
+        # Compute centroidal wrench cone in span form
+        if support == "right" or support == "left":
+            V_centroid = np.dot(G_stance, V_surf)
+        elif support == "double":
+            V_centroid = np.dot(G_stance, np.vstack([V_surf,V_surf]))
+
+        # Convert centroidal wrench cone to face form
+        A_centroid = span_to_face(V_centroid)
+
+        return A_centroid
 
     def ComputeLinearizedContactConstraint(self):
         """
@@ -141,6 +216,8 @@ class ValkyrieASController(ValkyrieQPController):
         based on bounding the CoM acceleration.
         """
         #TODO
+        A = self.ComputeGIWC("right",0.0)
+
         A_cwc = None
         b_cwc = None
 
@@ -152,13 +229,16 @@ class ValkyrieASController(ValkyrieQPController):
         Given the current template (x_lip) and task space (x_task) states, perform MPC
         in the template model while respecting contact constraints for the full model.
         """
+        #TODO
+        A_cwc, b_cwc = self.ComputeLinearizedContactConstraint()
+
         u_lip = np.array([[0.0],
                           [0.0]])
         u_task = np.dot(self.R,u_lip) + np.dot(self.Q,x_lip) + np.dot(self.K, x_task-np.dot(self.P,x_lip))
 
         return u_lip, u_task
 
-    def SolveWholeBodyQP(self, cache, time, q, qd, u_task):
+    def SolveWholeBodyQP(self, cache, context, q, qd, u_task):
         """
         Use a whole-body quadratic program to feedback linearize the task-space
         dynamics.
@@ -190,11 +270,11 @@ class ValkyrieASController(ValkyrieQPController):
 
         # Computed desired accelerations of the feet (at the corner points)
         xdd_left_des, xdd_right_des = self.get_desired_foot_accelerations(cache, 
-                                                                          time, 
+                                                                          context.get_time(), 
                                                                           qd, 
                                                                           Kp_foot, Kd_foot)
         # Specify support phase
-        support = self.fsm.SupportPhase(time)
+        support = self.fsm.SupportPhase(context.get_time())
        
         # Compute dynamic quantities. Note that we cast vectors as nx1 numpy arrays to allow
         # for matrix multiplication with np.dot().
@@ -282,11 +362,20 @@ class ValkyrieASController(ValkyrieQPController):
         # Generate a template trajectory that respects whole-body CWC constraints
         u_lip, u_task = self.DoTemplateMPC(x_lip, x_task)
 
+        # TEST
+        O_Xf_com = self.comForceTransform(cache)
+        A_centroid = self.ComputeGIWC("double",context.get_time())
+        A_cwc = np.dot(A_centroid, O_Xf_com)
+        f_com = u_task - self.f_mg
+
+        print(np.dot(A_cwc, f_com) <= 0)
+        print("")
+
+
         # Feedback linearize with a whole-body QP to get desired torques
-        tau = self.SolveWholeBodyQP(cache, context.get_time(), q, qd, u_task)
+        tau = self.SolveWholeBodyQP(cache, context, q, qd, u_task)
 
         # Simulate the template forward in time (simple forward Euler)
         self.x_lip += (np.dot(self.A_lip,self.x_lip) + np.dot(self.B_lip, u_lip))*self.dt
 
         output[:] = tau
-

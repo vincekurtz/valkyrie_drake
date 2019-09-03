@@ -8,6 +8,18 @@ import time
 import numpy as np
 import cdd
 
+def S(a):
+    """
+    Return the 3x3 cross product matrix 
+    such that S(a)*b = a x b.
+    """
+    assert a.shape == (3,) , "Input vector is not a numpy array of size (3,)"
+    S = np.asarray([[ 0.0 ,-a[2], a[1] ],
+                    [ a[2], 0.0 ,-a[0] ],
+                    [-a[1], a[0], 0.0  ]])
+
+    return S
+
 def face_to_span(A):
     """
     Convert a polyhedral cone from face form
