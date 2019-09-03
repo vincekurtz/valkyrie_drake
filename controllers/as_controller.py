@@ -29,7 +29,7 @@ class ValkyrieASController(ValkyrieQPController):
         m = get_total_mass(tree)
 
         # Spatial force on the CoM due to gravity
-        self.f_mg = np.array([0,0,0,0,0,m*g])[np.newaxis].T
+        self.f_mg = np.array([0,0,0,0,0,-m*g])[np.newaxis].T
 
         # Define template (LIPM) dynamics
         self.A_lip = np.zeros((4,4))
@@ -152,39 +152,39 @@ class ValkyrieASController(ValkyrieQPController):
         # A_all*f_all <= 0 ensures Coulomb friction is obeyed
         A_all = np.kron(np.eye(4),A_vertex)
 
-        # Surface wrench w_surf = [f_surf, tau_surf]' resulting from f_all
+        # Surface wrench w_surf = [tau_surf, f_surf]' resulting from f_all
         # w_surf = G_surf*f_all
         G_surf = np.zeros((6,12))
 
-        G_surf[0:3,:] = np.hstack([np.eye(3),np.eye(3),np.eye(3),np.eye(3)])  # sum of forces
+        G_surf[3:6,:] = np.hstack([np.eye(3),np.eye(3),np.eye(3),np.eye(3)])  # sum of forces
 
         p1,p2,p3,p4 = self.get_foot_contact_points() # sum of torques
-        G_surf[3:6,0:3] = S(p1)                        
-        G_surf[3:6,3:6] = S(p4)
-        G_surf[3:6,6:9] = S(p2)
-        G_surf[3:6,9:12] = S(p3)
+        G_surf[0:3,0:3] = S(p1)                        
+        G_surf[0:3,3:6] = S(p4)
+        G_surf[0:3,6:9] = S(p2)
+        G_surf[0:3,9:12] = S(p3)
 
         # Get foot (contact) positions in the world frame
         rf_pos, rf_vel = self.fsm.RightFootTrajectory(t)
         lf_pos, lf_vel = self.fsm.LeftFootTrajectory(t)
         
         # Centroidal wrench w_GI = G_stance*w_all, where w_all = [w_surf_1, w_surf_2, ...]'
-        # G_stance = [ -R     ,0  ]
-        #            [ -S(p)*R, -R]
+        # G_stance = [ R, S(p)*R ]
+        #            [ 0,   R    ]
         if support == "right":
             # We'll assume contacts are not rotated in the world frame, so R = eye(3)
-            G_stance = -np.eye(6)
-            G_stance[3:6,0:3] = -S(rf_pos.flatten())
+            G_stance = np.eye(6)
+            G_stance[0:3,3:6] = S(rf_pos.flatten())
         elif support == "left":
-            G_stance = -np.eye(6)
-            G_stance[3:6,0:3] = -S(lf_pos.flatten())
+            G_stance = np.eye(6)
+            G_stance[0:3,3:6] = S(lf_pos.flatten())
         elif support == "double":
             # w_GI = G_stance_right*w_right + G_stance_left*w_left
             G_stance = np.zeros((6,12))
-            G_stance[0:6,0:6] = -np.eye(6)
-            G_stance[3:6,0:3] = -S(rf_pos.flatten())
-            G_stance[0:6,6:12] = -np.eye(6)
-            G_stance[3:6,6:9] = -S(lf_pos.flatten())
+            G_stance[0:6,0:6] = np.eye(6)
+            G_stance[0:3,3:6] = S(rf_pos.flatten())
+            G_stance[0:6,6:12] = np.eye(6)
+            G_stance[0:3,9:12] = S(lf_pos.flatten())
         else:
             raise ValueError("Unknown support mode '%s'." % support)
 
@@ -363,13 +363,16 @@ class ValkyrieASController(ValkyrieQPController):
         u_lip, u_task = self.DoTemplateMPC(x_lip, x_task)
 
         # TEST
+        st = time.time()
         O_Xf_com = self.comForceTransform(cache)
         A_centroid = self.ComputeGIWC("double",context.get_time())
         A_cwc = np.dot(A_centroid, O_Xf_com)
         f_com = u_task - self.f_mg
 
-        print(np.dot(A_cwc, f_com) <= 0)
-        print("")
+
+        print(np.dot(A_cwc,f_com)<=0)
+        print(time.time()-st)
+
 
 
         # Feedback linearize with a whole-body QP to get desired torques
