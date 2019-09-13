@@ -5,6 +5,7 @@
 #
 ##
 
+import itertools
 from qp_controller import *
 
 class ValkyrieASController(ValkyrieQPController):
@@ -28,8 +29,10 @@ class ValkyrieASController(ValkyrieQPController):
         omega = np.sqrt(g/h)
         m = get_total_mass(tree)
 
-        # Spatial force on the CoM due to gravity
-        self.f_mg = np.array([0,0,0,0,0,-m*g])[np.newaxis].T
+        self.l_max = 100.0   # maximum linear momentum of the CoM for CWC linearization
+
+        # Wrench on the CoM due to gravity
+        self.w_mg = np.array([0,0,0,0,0,-m*g])[np.newaxis].T
 
         # Define template (LIPM) dynamics
         self.A_lip = np.zeros((4,4))
@@ -131,7 +134,7 @@ class ValkyrieASController(ValkyrieQPController):
 
         return np.vstack([p_com, h_com])
 
-    def ComputeGIWC(self, support, t):
+    def ComputeGIWC(self, t):
         """
         Compute the Gravito Intertial Wrench Cone for the current stance
 
@@ -140,6 +143,9 @@ class ValkyrieASController(ValkyrieQPController):
         where f_{com} is the wrench on the center of mass expressed in the 
         world frame. 
         """
+
+        support = self.fsm.SupportPhase(t)
+        
         # Friction pyramid for forces at each vertex of each contact surface
         # A_vertex*f_vertex <= 0 ensures Coulomb friction is obeyed
         A_vertex = np.array([[ 1.0, 0.0, -self.mu],
@@ -205,7 +211,7 @@ class ValkyrieASController(ValkyrieQPController):
 
         return A_centroid
 
-    def ComputeLinearizedContactConstraint(self):
+    def ComputeLinearizedContactConstraint(self, t):
         """
         Compute the linearized contact constraint
 
@@ -215,26 +221,129 @@ class ValkyrieASController(ValkyrieQPController):
         for the current stance, based on linearizing the bilinear GIWC constraint
         based on bounding the CoM acceleration.
         """
-        #TODO
-        A = self.ComputeGIWC("right",0.0)
+        # Centroidal wrench cone expressed in the world frame
+        # such that A*0_Xf_com*(u_com-mg) <= 0 enforces the CWC constraint
+        A = self.ComputeGIWC(t)
 
-        A_cwc = None
-        b_cwc = None
+        A_cwc = np.zeros((8*A.shape[0],15))
+        b_cwc = np.zeros((8*A.shape[0],1))
+
+        # Iterate over corners of the cube constrainting CoM accelerations
+        unit_corners = list(itertools.product(*zip([-1,-1,-1],[1,1,1])))
+        for i in range(8):
+            unit_corner = unit_corners[i]
+            l_dot = self.l_max*np.asarray(unit_corner)
+
+            # Compute the constraint 
+            #   A*u_com + A*[S(mg)-S(l_dot)]*p_com <= A*[0 ]
+            #               [    0         ]            [mg]
+            # for this value of l_dot
+            mg = self.w_mg[3:6,0]
+            cross_term = np.vstack([ S(mg)-S(l_dot),
+                                     np.zeros((3,3))]) 
+
+            A_cwc_i = np.hstack( [ np.dot(A,cross_term), np.zeros((16,6)), A ])
+            b_cwc_i = np.dot(A,self.w_mg)
+          
+            # Add this constraint to the stack of all constraints
+            start_idx = i*A.shape[0]
+            end_idx = (i+1)*A.shape[0]
+            A_cwc[start_idx:end_idx,:] = A_cwc_i
+
+            b_cwc[start_idx:end_idx,:] = b_cwc_i
 
         return A_cwc, b_cwc
-         
 
-    def DoTemplateMPC(self, x_lip, x_task):
+    def ComputeAccelerationBoundConstraint(self):
+        """
+        Compute the constraint
+
+            A_bnd*u_task <= b_bound
+
+        which enforces that the CoM acceleration is bounded
+        by self.l_max in the sense that
+
+            \| m pdd_com \|_infty <= l_max
+        """
+        A_bnd = np.array([[0,0,0, 1, 0, 0],
+                          [0,0,0,-1, 0, 0],
+                          [0,0,0, 0, 1, 0],
+                          [0,0,0, 0,-1, 0],
+                          [0,0,0, 0, 0, 1],
+                          [0,0,0, 0, 0,-1]])
+
+        b_bnd = self.l_max*np.ones((6,1))
+
+        return A_bnd, b_bnd
+
+    def DoTemplateMPC(self, t, x_lip_init, x_task_init):
         """
         Given the current template (x_lip) and task space (x_task) states, perform MPC
         in the template model while respecting contact constraints for the full model.
         """
-        #TODO
-        A_cwc, b_cwc = self.ComputeLinearizedContactConstraint()
+        # Get linearized contact constraints
+        A_cwc, b_cwc = self.ComputeLinearizedContactConstraint(t)
+        A_bnd, b_bnd = self.ComputeAccelerationBoundConstraint()
+
+        # Specify Parameters
+        Q_mpc = np.eye(4)
+        Qf_mpc = np.eye(4)
+        R_mpc = np.eye(2)
+        N = 10
+
+        # Set up a Drake MathematicalProgram
+        mp = MathematicalProgram()
+
+        # Create optimization variables
+        x_lip = mp.NewContinuousVariables(4,N,"x_lip")
+        u_lip = mp.NewContinuousVariables(2,N-1,"u_lip")
+        x_task = mp.NewContinuousVariables(9,N,"x_task")
+        u_task = mp.NewContinuousVariables(6,N-1,"u_task")
+
+        # Initial condition constraints
+        mp.AddLinearEqualityConstraint(np.eye(4), x_lip_init, x_lip[:,0])
+        mp.AddLinearEqualityConstraint(np.eye(9), x_task_init, x_task[:,0])
+
+        for i in range(N-1):
+            # Add Running Costs
+            x_lip_des = np.zeros(x_lip_init.shape)
+            u_lip_des = np.zeros((2,1))
+            mp.AddQuadraticErrorCost(Q_mpc,x_lip_des,x_lip[:,i])
+            mp.AddQuadraticErrorCost(R_mpc,u_lip_des,u_lip[:,i])
+
+            # Add dynamic constraints for the LIPM
+            A_bar_lip = np.hstack([self.A_lip, self.B_lip, -np.eye(4)])
+            x_bar_lip = np.hstack([x_lip[:,i],u_lip[:,i],x_lip[:,i+1]])[np.newaxis].T
+            mp.AddLinearEqualityConstraint(A_bar_lip, np.zeros((4,1)),x_bar_lip)
+
+            # Add dynamic constraints for the task space
+            A_bar_task = np.hstack([self.A_task, self.B_task, -np.eye(9)])
+            x_bar_task = np.hstack([x_task[:,i],u_task[:,i],x_task[:,i+1]])[np.newaxis].T
+            mp.AddLinearEqualityConstraint(A_bar_task, np.zeros((9,1)),x_bar_task)
+
+            # Add interface constraint
+            # TODO
+
+            # Add contact wrench cone constraint
+            x_u = np.hstack([x_task[:,i],u_task[:,i]])[np.newaxis].T  # [x_task;u_task]
+            lb = -np.inf*np.ones(b_cwc.shape) # lower bound
+            ub = b_cwc                        # upper bound
+            mp.AddLinearConstraint(A_cwc, lb, ub, x_u)
+
+        # Add terminal cost
+        x_lip_des = np.zeros(x_lip_init.shape)
+        mp.AddQuadraticErrorCost(Qf_mpc,x_lip_des,x_lip[:,N-1])
+            
+
+        # Solve the QP
+        solver = OsqpSolver()
+        res = solver.Solve(mp,None,None)
+        #print(res.GetSolution(x_task))
+
 
         u_lip = np.array([[0.0],
                           [0.0]])
-        u_task = np.dot(self.R,u_lip) + np.dot(self.Q,x_lip) + np.dot(self.K, x_task-np.dot(self.P,x_lip))
+        u_task = np.dot(self.R,u_lip) + np.dot(self.Q,x_lip_init) + np.dot(self.K, x_task_init-np.dot(self.P,x_lip_init))
 
         return u_lip, u_task
 
@@ -337,6 +446,18 @@ class ValkyrieASController(ValkyrieQPController):
         # Dynamic constraints 
         dynamics_constraint = self.AddDynamicsConstraint(H, qdd, C, B, tau, contact_jacobians, f_contact)
 
+        # DEBUG: incentivize high torques to make ground contact slip. This is not a problem if
+        # we have friction constraints, but causes problems if we remove the friction constraints.
+        # We can use this sort of idea to debug post-processing
+        # steps that allow us to project friction constraints to the template but correct for issues with
+        # a kinematic chain using a null-space projector.
+        idx = 11
+        Q_tau = np.zeros((self.nu,self.nu))
+        Q_tau[idx,idx] = 0.001
+        tau_des = np.zeros((self.nu,1))
+        tau_des[idx] = 150
+        self.mp.AddQuadraticErrorCost(Q=Q_tau,x_desired=tau_des,vars=tau)
+
         # Friction cone (really pyramid) constraints 
         #friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
 
@@ -360,18 +481,27 @@ class ValkyrieASController(ValkyrieQPController):
         x_task = self.GetTaskSpaceState(cache, q, qd)
 
         # Generate a template trajectory that respects whole-body CWC constraints
-        u_lip, u_task = self.DoTemplateMPC(x_lip, x_task)
+        #u_lip, u_task = self.DoTemplateMPC(context.get_time(), x_lip, x_task)
+
+        u_task = np.zeros((6,1))
+
 
         # TEST
-        st = time.time()
-        O_Xf_com = self.comForceTransform(cache)
-        A_centroid = self.ComputeGIWC("double",context.get_time())
-        A_cwc = np.dot(A_centroid, O_Xf_com)
-        f_com = u_task - self.f_mg
+        #st = time.time()
+        #O_Xf_com = self.comForceTransform(cache)
+        #A_centroid = self.ComputeGIWC(context.get_time())
+        #A_cwc = np.dot(A_centroid, O_Xf_com)
+        #f_com = u_task - self.w_mg
+
+        #print(np.all(np.dot(A_cwc,f_com)<=0))
+
+        #A_cwc, b_cwc = self.ComputeLinearizedContactConstraint(context.get_time())
+
+        #xu = np.vstack([x_task,u_task])
+        #print(np.all(np.dot(A_cwc,xu)<=b_cwc))
+        #print("")
 
 
-        print(np.dot(A_cwc,f_com)<=0)
-        print(time.time()-st)
 
 
 
@@ -379,6 +509,6 @@ class ValkyrieASController(ValkyrieQPController):
         tau = self.SolveWholeBodyQP(cache, context, q, qd, u_task)
 
         # Simulate the template forward in time (simple forward Euler)
-        self.x_lip += (np.dot(self.A_lip,self.x_lip) + np.dot(self.B_lip, u_lip))*self.dt
+        #self.x_lip += (np.dot(self.A_lip,self.x_lip) + np.dot(self.B_lip, u_lip))*self.dt
 
         output[:] = tau
