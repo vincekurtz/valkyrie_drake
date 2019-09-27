@@ -322,7 +322,9 @@ class ValkyrieASController(ValkyrieQPController):
             mp.AddLinearEqualityConstraint(A_bar_task, np.zeros((9,1)),x_bar_task)
 
             # Add interface constraint
-            # TODO
+            A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
+            x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
+            mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
 
             # Add contact wrench cone constraint
             x_u = np.hstack([x_task[:,i],u_task[:,i]])[np.newaxis].T  # [x_task;u_task]
@@ -334,18 +336,14 @@ class ValkyrieASController(ValkyrieQPController):
         x_lip_des = np.zeros(x_lip_init.shape)
         mp.AddQuadraticErrorCost(Qf_mpc,x_lip_des,x_lip[:,N-1])
             
-
         # Solve the QP
         solver = OsqpSolver()
         res = solver.Solve(mp,None,None)
-        #print(res.GetSolution(x_task))
 
+        u_lip_trajectory = res.GetSolution(u_lip)
+        u_task_trajectory = res.GetSolution(u_task)
 
-        u_lip = np.array([[0.0],
-                          [0.0]])
-        u_task = np.dot(self.R,u_lip) + np.dot(self.Q,x_lip_init) + np.dot(self.K, x_task_init-np.dot(self.P,x_lip_init))
-
-        return u_lip, u_task
+        return u_lip_trajectory, u_task_trajectory
 
     def CheckContactFrictionConstraint(self, f_contact):
         """
@@ -417,14 +415,14 @@ class ValkyrieASController(ValkyrieQPController):
         ############## Tuneable Paramters ################
 
         Kp_q = 1     # Joint angle PD gains
-        Kd_q = 10
+        Kd_q = 1
 
         Kp_foot = 00.0   # foot position PD gains
         Kd_foot = 100.0 
         
         Kd_contact = 10.0  # Contact movement damping P gain
 
-        w1 = 100.0   # joint tracking weight
+        w1 = 000.1   # joint tracking weight
         w2 = 50.0    # foot tracking weight
 
         nu_min = -0.001   # slack for contact constraint
@@ -493,16 +491,16 @@ class ValkyrieASController(ValkyrieQPController):
         centroidal_constraint = self.AddJacobianTypeConstraint(A, qdd, Ad_qd, hd_com_des)
        
         # Contact acceleration constraint
-        #for j in range(num_contacts):
-        #    J_cont = contact_jacobians[j]
-        #    Jd_qd_cont = contact_jacobians_dot_v[j]
-        #    xdd_cont_des = -Kd_contact*Jd_qd_cont
+        for j in range(num_contacts):
+            J_cont = contact_jacobians[j]
+            Jd_qd_cont = contact_jacobians_dot_v[j]
+            xdd_cont_des = -Kd_contact*Jd_qd_cont
 
-        #    contact_constraint = self.AddJacobianTypeConstraint(J_cont, qdd, Jd_qd_cont, xdd_cont_des)
+            contact_constraint = self.AddJacobianTypeConstraint(J_cont, qdd, Jd_qd_cont, xdd_cont_des)
  
-        #    # add some slight flexibility to this constraint to avoid infeasibility
-        #    contact_constraint.evaluator().UpdateUpperBound(nu_max*np.array([1.0,1.0,1.0]))
-        #    contact_constraint.evaluator().UpdateLowerBound(nu_min*np.array([1.0,1.0,1.0]))
+            # add some slight flexibility to this constraint to avoid infeasibility
+            contact_constraint.evaluator().UpdateUpperBound(nu_max*np.array([1.0,1.0,1.0]))
+            contact_constraint.evaluator().UpdateLowerBound(nu_min*np.array([1.0,1.0,1.0]))
        
         # Dynamic constraints 
         dynamics_constraint = self.AddDynamicsConstraint(H, qdd, C, B, tau, contact_jacobians, f_contact)
@@ -512,12 +510,12 @@ class ValkyrieASController(ValkyrieQPController):
         # We can use this sort of idea to debug post-processing
         # steps that allow us to project friction constraints to the template but correct for issues with
         # a kinematic chain using a null-space projector.
-        idx = 10
-        Q_tau = np.zeros((self.nu,self.nu))
-        Q_tau[idx,idx] = 1.1
-        tau_des = np.zeros((self.nu,1))
-        tau_des[idx] = -340
-        self.mp.AddQuadraticErrorCost(Q=Q_tau,x_desired=tau_des,vars=tau)
+        #idx = 10
+        #Q_tau = np.zeros((self.nu,self.nu))
+        #Q_tau[idx,idx] = 1.1
+        #tau_des = np.zeros((self.nu,1))
+        #tau_des[idx] = -340
+        #self.mp.AddQuadraticErrorCost(Q=Q_tau,x_desired=tau_des,vars=tau)
 
         # Friction cone (really pyramid) constraints 
         #friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
@@ -552,9 +550,11 @@ class ValkyrieASController(ValkyrieQPController):
         x_task = self.GetTaskSpaceState(cache, q, qd)
 
         # Generate a template trajectory that respects whole-body CWC constraints
-        #u_lip, u_task = self.DoTemplateMPC(context.get_time(), x_lip, x_task)
+        u_lip_traj, u_task_traj = self.DoTemplateMPC(context.get_time(), x_lip, x_task)
 
-        u_task = np.zeros((6,1))
+        u_task = u_task_traj[:,0][np.newaxis].T
+
+        #u_task = np.zeros((6,1))
 
 
         # TEST
