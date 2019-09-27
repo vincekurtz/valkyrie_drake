@@ -23,7 +23,7 @@ tree = RigidBodyTree(robot_urdf, FloatingBaseType.kRollPitchYaw)
 # Add a flat ground with friction
 X_BG = RigidTransform()
 surface_friction = CoulombFriction(
-        static_friction = 0.7,
+        static_friction = 0.6,
         dynamic_friction = 0.1)
 plant.RegisterCollisionGeometry(
         plant.world_body(),      # the body for which this object is registered
@@ -51,6 +51,7 @@ builder.Connect(
 
 # Set up a controller
 controller = builder.AddSystem(ValkyrieASController(tree,plant,dt))
+#controller = builder.AddSystem(ValkyrieQPController(tree,plant))
 builder.Connect(
         plant.get_state_output_port(),
         controller.get_input_port(0))
@@ -79,4 +80,4 @@ state.SetFromVector(initial_state_vec)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(1.0)
+simulator.AdvanceTo(10.0)
