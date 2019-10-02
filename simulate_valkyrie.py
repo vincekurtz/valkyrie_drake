@@ -23,7 +23,7 @@ tree = RigidBodyTree(robot_urdf, FloatingBaseType.kRollPitchYaw)
 # Add a flat ground with friction
 X_BG = RigidTransform()
 surface_friction = CoulombFriction(
-        static_friction = 0.6,
+        static_friction = 0.7,
         dynamic_friction = 0.1)
 plant.RegisterCollisionGeometry(
         plant.world_body(),      # the body for which this object is registered
