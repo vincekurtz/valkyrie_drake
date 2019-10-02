@@ -319,7 +319,8 @@ class ValkyrieQPController(ValkyriePDController):
         for j in range(num_contacts):
             J_cont = contact_jacobians[j]
             Jd_qd_cont = contact_jacobians_dot_v[j]
-            xdd_cont_des = -Kd_contact*Jd_qd_cont
+            xd_cont = np.dot(J_cont,qd)[np.newaxis].T  # (3x1) vector
+            xdd_cont_des = -Kd_contact*xd_cont
 
             contact_constraint = self.AddJacobianTypeConstraint(J_cont, qdd, Jd_qd_cont, xdd_cont_des)
  
