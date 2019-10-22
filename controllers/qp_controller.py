@@ -16,13 +16,14 @@ class ValkyrieQPController(ValkyriePDController):
                               step_time=0.9)
         #self.fsm = StandingFSM()
 
-        self.mu = 0.7             # assumed friction coefficient
+        self.mu = 0.1             # assumed friction coefficient
 
         self.mp = MathematicalProgram()  # QP that we'll use for whole-body control
 
         self.right_foot_index = self.tree.FindBody('rightFoot').get_body_index()
         self.left_foot_index = self.tree.FindBody('leftFoot').get_body_index()
         self.world_index = self.tree.world().get_body_index()
+        self.torso_index = self.tree.FindBody('torso').get_body_index()
 
     def get_foot_contact_points(self):
         """
@@ -194,28 +195,21 @@ class ValkyrieQPController(ValkyriePDController):
             w_3* || qdd_des - qdd ||^2 +
             w_4* || J_left*qdd + Jd_left*qd - xdd_left_des ||^2 +
             w_4* || J_right*qdd + Jd_right*qd - xdd_right_des ||^2 +
+            w_5* || J_torso*qdd + Jd_torso*qd - rpydd_torso_des ||^2
         subject to:
                 H*qdd + C = B*tau + sum(J'*f)
                 f \in friction cones
                 J_cj*qdd + J'_cj*qd == nu
                 nu_min <= nu <= nu_max
-
-        Parameters:
-            cache         : kinematics cache for computing dynamic quantities
-            xdd_com_des   : desired center of mass acceleration
-            hd_com_des    : desired centroidal momentum dot
-            xdd_left_des  : desired accelerations of the left foot contact points
-            xdd_right_des : desired accelerations of the right foot contact points
-            qdd_des       : desired joint acceleration
-            support       : what stance phase we're in. "double", "left", or "right"
         """
 
         ############## Tuneable Paramters ################
 
         w1 = 50.0   # center-of-mass tracking weight
-        w2 = 0.1  # centroid momentum weight
-        w3 = 0.5   # joint tracking weight
-        w4 = 50.0    # foot tracking weight
+        w2 = 0.1    # centroid momentum weight
+        w3 = 0.5    # joint tracking weight
+        w4 = 50.0   # foot tracking weight
+        w5 = 50.0   # torso orientation weight
 
         nu_min = -1e-10   # slack for contact constraint
         nu_max = 1e-10
@@ -231,39 +225,13 @@ class ValkyrieQPController(ValkyriePDController):
         Kp_foot = 100.0   # foot position PD gains
         Kd_foot = 10.0 
 
+        Kp_torso = 500.0   # torso orientation PD gains
+        Kd_torso = 50.0
+
         Kd_contact = 10.0  # Contact movement damping P gain
 
         ##################################################
-
-        # Compute desired joint acclerations
-        q_nom = self.nominal_state[0:self.np]
-        qd_nom = self.nominal_state[self.np:]
-        qdd_des = Kp_q*(q_nom-q) + Kd_q*(qd_nom-qd)
-        qdd_des = qdd_des[np.newaxis].T
-
-        # Compute desired center of mass acceleration
-        x_com = self.tree.centerOfMass(cache)[np.newaxis].T
-        xd_com = np.dot(self.tree.centerOfMassJacobian(cache), qd)[np.newaxis].T
-        x_com_nom, xd_com_nom, xdd_com_nom = self.fsm.ComTrajectory(context.get_time())
-      
-        xdd_com_des = xdd_com_nom + Kp_com*(x_com_nom-x_com) + Kd_com*(xd_com_nom-xd_com)
-
-        # Compute desired centroid momentum dot
-        A_com = self.tree.centroidalMomentumMatrix(cache)
-        Ad_com_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
-        h_com = np.dot(A_com, qd)[np.newaxis].T
-
-        m = self.tree.massMatrix(cache)[0,0]  # total mass
-        h_com_nom = np.vstack([np.zeros((3,1)),m*xd_com_nom])  # desired angular velocity is zero,
-                                                               # CoM velocity matches the CoM trajectory
-        hd_com_des = Kp_h*(h_com_nom - h_com)
-
-        # Computed desired accelerations of the feet (at the corner points)
-        xdd_left_des, xdd_right_des = self.get_desired_foot_accelerations(cache, 
-                                                                          context.get_time(), 
-                                                                          qd, 
-                                                                          Kp_foot, Kd_foot)
-
+        
         # Specify support phase
         support = self.fsm.SupportPhase(context.get_time())
 
@@ -284,6 +252,46 @@ class ValkyrieQPController(ValkyriePDController):
 
         contact_jacobians, contact_jacobians_dot_v = self.get_contact_jacobians(cache, support)
         num_contacts = len(contact_jacobians)
+
+        J_torso = self.tree.relativeRollPitchYawJacobian(cache, self.world_index, self.torso_index,True)
+        Jd_qd_torso = self.tree.relativeRollPitchYawJacobianDotTimesV(cache,
+                                                                      self.world_index,
+                                                                      self.torso_index)[np.newaxis].T
+
+        # Compute desired joint acclerations
+        q_nom = self.nominal_state[0:self.np]
+        qd_nom = self.nominal_state[self.np:]
+        qdd_des = Kp_q*(q_nom-q) + Kd_q*(qd_nom-qd)
+        qdd_des = qdd_des[np.newaxis].T
+
+        # Compute desired center of mass acceleration
+        x_com = self.tree.centerOfMass(cache)[np.newaxis].T
+        xd_com = np.dot(J_com, qd)[np.newaxis].T
+        x_com_nom, xd_com_nom, xdd_com_nom = self.fsm.ComTrajectory(context.get_time())
+      
+        xdd_com_des = xdd_com_nom + Kp_com*(x_com_nom-x_com) + Kd_com*(xd_com_nom-xd_com)
+
+        # Compute desired centroid momentum dot
+        h_com = np.dot(A, qd)[np.newaxis].T
+        m = self.tree.massMatrix(cache)[0,0]  # total mass
+        h_com_nom = np.vstack([np.zeros((3,1)),m*xd_com_nom])  # desired angular velocity is zero,
+                                                               # CoM velocity matches the CoM trajectory
+        hd_com_des = Kp_h*(h_com_nom - h_com)
+
+        # Computed desired accelerations of the feet (at the corner points)
+        xdd_left_des, xdd_right_des = self.get_desired_foot_accelerations(cache, 
+                                                                          context.get_time(), 
+                                                                          qd, 
+                                                                          Kp_foot, Kd_foot)
+
+        # Compute desired base frame angular acceleration
+        rpy_torso = self.tree.relativeRollPitchYaw(cache, self.world_index, self.torso_index)[np.newaxis].T
+        rpyd_torso = np.dot(J_torso,qd)[np.newaxis].T
+        rpy_torso_nom = np.zeros((3,1))
+        rpyd_torso_nom = np.zeros((3,1))
+
+        rpydd_torso_des = Kp_torso*(rpy_torso_nom - rpy_torso) + Kd_torso*(rpyd_torso_nom - rpyd_torso)
+
 
         #################### QP Formulation ##################
 
@@ -314,6 +322,9 @@ class ValkyrieQPController(ValkyriePDController):
             # Right foot tracking cost
             J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index, relative_position=corners[i])
             self.AddJacobianTypeCost(J_right, qdd, Jd_qd_right, xdd_right_des[i], weight=w4)
+        
+        # torso orientation cost
+        torso_cost = self.AddJacobianTypeCost(J_torso, qdd, Jd_qd_torso, rpydd_torso_des, weight=w5)
             
         # Contact acceleration constraint
         for j in range(num_contacts):

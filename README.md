@@ -3,7 +3,7 @@ Example of controlling a simulated [Valkyrie humanoid](https://nasa-jsc-robotics
 
 ## Dependencies
 
-- Drake, including python bindings
+- [Fork of Drake](https://github.com/vincekurtz/drake) with extra python bindings
 - python2.7
 
 ## Usage
