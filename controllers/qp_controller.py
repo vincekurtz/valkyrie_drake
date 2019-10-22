@@ -287,7 +287,7 @@ class ValkyrieQPController(ValkyriePDController):
         # Compute desired base frame angular acceleration
         rpy_torso = self.tree.relativeRollPitchYaw(cache, self.world_index, self.torso_index)[np.newaxis].T
         rpyd_torso = np.dot(J_torso,qd)[np.newaxis].T
-        rpy_torso_nom = np.zeros((3,1))
+        rpy_torso_nom = np.asarray([[0.0],[-0.1],[0.0]])
         rpyd_torso_nom = np.zeros((3,1))
 
         rpydd_torso_des = Kp_torso*(rpy_torso_nom - rpy_torso) + Kd_torso*(rpyd_torso_nom - rpyd_torso)

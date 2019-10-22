@@ -353,9 +353,9 @@ class WalkingFSM(object):
 
         # Set up the Trajectory optimization problem
         mp = MathematicalProgram()
-        x = mp.NewContinuousVariables(4,n_steps,'x')
-        y = mp.NewContinuousVariables(2,n_steps,'y')
-        u = mp.NewContinuousVariables(2,n_steps,'u')
+        x = mp.NewContinuousVariables(4,n_steps,'x')  # CoM position and velocity
+        y = mp.NewContinuousVariables(2,n_steps,'y')  # zero moment point
+        u = mp.NewContinuousVariables(2,n_steps,'u')  # LIP center-of-pressure
 
         # Initial constraint
         mp.AddLinearEqualityConstraint(np.eye(2), x_com[0:2], x[0:2,0])
@@ -363,7 +363,7 @@ class WalkingFSM(object):
 
         # Cost parameters
         Q = 20*np.eye(2)
-        Qf = 10*np.eye(2)
+        Qf = 100*np.eye(2)
         R = np.eye(2)
 
         for i in range(n_steps-1):
@@ -387,6 +387,10 @@ class WalkingFSM(object):
         y_des = self.zmp_trajectory.value(time+dt*n_steps)
         mp.AddQuadraticErrorCost(Qf,y_des, y[:,n_steps-1])
         mp.AddQuadraticCost(R, np.zeros((2,1)), u[:,n_steps-1])
+
+        # Terminal constraint: CoM should be directly above the ZMP when we stop
+        mp.AddLinearEqualityConstraint( y[0,n_steps-1] == x[0,n_steps-1] )
+        mp.AddLinearEqualityConstraint( y[1,n_steps-1] == x[1,n_steps-1] )
 
         solver = OsqpSolver()
         res = solver.Solve(mp, initial_guess=None, solver_options=None)
