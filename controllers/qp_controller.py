@@ -10,10 +10,10 @@ class ValkyrieQPController(ValkyriePDController):
     def __init__(self, tree, plant):
         ValkyriePDController.__init__(self, tree, plant)
 
-        self.fsm = WalkingFSM(n_steps=3,         # Finite State Machine describing CoM trajectory,
-                              step_length=0.60,   # swing foot trajectories, and stance phases.
-                              step_height=0.10,
-                              step_time=0.9)
+        self.fsm = WalkingFSM(n_steps=4,         # Finite State Machine describing CoM trajectory,
+                              step_length=0.50,   # swing foot trajectories, and stance phases.
+                              step_height=0.05,
+                              step_time=1.0)
         #self.fsm = StandingFSM()
 
         self.mu = 0.1             # assumed friction coefficient

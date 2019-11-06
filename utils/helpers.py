@@ -8,6 +8,22 @@ import time
 import numpy as np
 import cdd
 
+def AddForwardEulerDynamicsConstraint(mp, A, B, x, u, xnext, dt):
+    """
+    Add a dynamics constraint to the given Drake mathematical program mp, represinting
+    the euler dynamics:
+
+        xnext = x + (A*x + B*u)*dt,
+
+    where x, u, and xnext are symbolic variables.
+    """
+    n = A.shape[0]
+    Aeq = np.hstack([ (np.eye(n)+A*dt), B*dt, -np.eye(n) ])
+    beq = np.zeros((n,1))
+    xeq = np.hstack([ x, u, xnext])[np.newaxis].T
+
+    mp.AddLinearEqualityConstraint(Aeq,beq,xeq)
+
 def S(a):
     """
     Return the 3x3 cross product matrix 

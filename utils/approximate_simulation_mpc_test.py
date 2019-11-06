@@ -84,17 +84,16 @@ sdcon_1 = np.vstack([
 sdcon_2 = -(np.dot(Mbar, A_task.T) + np.dot(A_task, Mbar) + np.dot(Kbar.T,B_task.T) + np.dot(B_task,Kbar) + 2*lmbda*Mbar)
 
 # Add semidefinite constraints with some epsilon for numerical stability
-interface_mp.AddPositiveSemidefiniteConstraint(sdcon_1 - 1e-4*np.eye(sdcon_1.shape[0]))
-interface_mp.AddPositiveSemidefiniteConstraint(sdcon_2 - 1e-4*np.eye(sdcon_2.shape[0]))
-interface_mp.AddPositiveSemidefiniteConstraint(Mbar-1e-4*np.eye(9))
+interface_mp.AddPositiveSemidefiniteConstraint(sdcon_1 - 1e-5*np.eye(sdcon_1.shape[0]))
+interface_mp.AddPositiveSemidefiniteConstraint(sdcon_2 - 1e-5*np.eye(sdcon_2.shape[0]))
+interface_mp.AddPositiveSemidefiniteConstraint(Mbar-1e-3*np.eye(9))
 
-#interface_mp.AddCost(np.trace(Mbar))
+interface_mp.AddCost(-np.trace(Mbar))                # incentivize a tight error bound 
 interface_mp.AddCost(np.trace(np.dot(Kbar.T,Kbar)))  # penalize high control gains
 
 result = Solve(interface_mp)
 
 assert result.is_success(), "Interface SDP infeasible"
-print(result.GetSolution(Kbar))
 M = np.linalg.inv(result.GetSolution(Mbar))
 K = np.dot(result.GetSolution(Kbar),M)
 
@@ -120,13 +119,6 @@ assert np.all(C_lip == np.dot(C_task,P)) , "Failed test C_lip = C_task*P"
 
 assert np.all( np.dot(P,A_lip) == np.dot(A_task,P) + np.dot(B_task,Q) ) \
             , "Failed Test P*A_lip = A_task*P+B*Q"
-
-# Choose feedback control gain K via LQR
-#Q_task = np.diag([2000,2000,10, 1,1,1, 1,1,1])
-#R_task = 1.01*np.eye(6)
-#K, V = LinearQuadraticRegulator(A_task, B_task, Q_task, R_task)
-#K = -K
-
 
 ###############################################
 # MPC formulation
@@ -174,13 +166,13 @@ def perform_template_mpc(t, x_lip_init, x_task_init):
                                           dt)
 
         # Add interface constraint
-        #A_interface = np.hstack([R, (Q-np.dot(K,P)), K, -np.eye(6)])
-        #x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
-        #mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
+        A_interface = np.hstack([R, (Q-np.dot(K,P)), K, -np.eye(6)])
+        x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
+        mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
 
 
     # Add terminal cost
-    mp.AddQuadraticErrorCost(Q_mpc,np.zeros((2,1)),x_lip[2:4,N-1])  # Penalize CoM accelrations
+    mp.AddQuadraticErrorCost(Qf_mpc,np.zeros((2,1)),x_lip[2:4,N-1])  # Penalize CoM accelrations
         
     # Solve the QP
     solver = OsqpSolver()
@@ -224,10 +216,6 @@ for i in range(n_steps):
     u_lip = u_lip_traj[:,0][np.newaxis].T
     x_task = x_task_traj[:,0][np.newaxis].T
     u_task = u_task_traj[:,0][np.newaxis].T
-
-    # DEBUG
-    u_task = np.dot(R,u_lip) + np.dot(Q,x_lip) + np.dot(K , (x_task - np.dot(P,x_lip)))
-    u_task = np.clip(u_task,-500,500)
 
     # Record plottable values
     p_zmp_ref[i,:] = zmp_trajectory.value(t).flatten()

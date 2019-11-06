@@ -21,6 +21,13 @@ class StandingFSM(object):
         self.x_right_init = np.asarray([[-0.071], [-0.138], [0.099]])
         self.x_left_init = np.asarray([[-0.071], [0.138], [0.099]])
 
+        # define ZMP trajectory
+        self.zmp_trajectory = type('', (), {})()  # define a new class in one line so we can imitate
+                                                  # the results using a polynomial interpolation, in 
+                                                  # which case we access the zmp trajectory at time t 
+                                                  # via zmp_trajectory.value(t)
+        self.zmp_trajectory.value = lambda t : np.zeros((2,1))
+
     def SupportPhase(self, time):
         """
         Return the current support phase, "double", "left", or "right".
@@ -221,6 +228,7 @@ class WalkingFSM(object):
 
         # ZMP reference knot points must be formatted such that each column is a knot point
         zmp_ref = zmp_ref.T
+
 
         self.zmp_trajectory = PiecewisePolynomial.FirstOrderHold(break_times,zmp_ref)
 
