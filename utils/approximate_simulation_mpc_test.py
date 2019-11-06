@@ -53,13 +53,9 @@ A_lip[2:4,0:2] = omega**2*np.eye(2)
 B_lip = np.zeros((4,2))
 B_lip[2:4,:] = -omega**2*np.eye(2)
 
-C_lip = np.zeros((9,4))       # Output for approximate simulation
+C_lip = np.zeros((9,4))
 C_lip[0:2,0:2] = np.eye(2)
 C_lip[6:8,2:4] = m*np.eye(2)
-
-C_lip_zmp = np.zeros((2,4))   # Output for ZMP planning = CoM acceleration
-C_lip_zmp[0:2,0:2] = omega**2*np.eye(2)
-D_lip_zmp = -omega**2*np.eye(2)
 
 # Task-space (centroidal) dynamics
 A_task = np.zeros((9,9))
@@ -74,14 +70,59 @@ C_task = np.eye(9)
 # Interface Definition
 ###############################################
 
+interface_mp = MathematicalProgram()
+
+# Choose feedback control gain K via LQR
+Q_task = np.diag([2000,2000,10, 1,1,1, 1,1,1])
+R_task = 0.01*np.eye(6)
+K, P = LinearQuadraticRegulator(A_task, B_task, Q_task, R_task)
+K = -K
+
+# Find M by solving an SDP
+lmbda = 0.001
+M = interface_mp.NewSymmetricContinuousVariables(9,"M")
+
+interface_mp.AddPositiveSemidefiniteConstraint(M - np.dot(C_task.T, C_task))
+
+AplusBK = A_task + np.dot(B_task, K)
+interface_mp.AddPositiveSemidefiniteConstraint(-2*lmbda*M - np.dot(AplusBK.T,M) - np.dot(M,AplusBK) )
+
+result = Solve(interface_mp)
+
+assert result.is_success(), "Interface SDP infeasible"
+M = result.GetSolution(M)
+
+# Choose P, Q, and R by hand
+P = C_lip
+
+Q = np.zeros((6,4))
+Q[3:5,0:2] = omega**2*m*np.eye(2)
+
+R = np.zeros((6,2))
+R[3:5] = -m*omega**2*np.eye(2)
+
+# Double check the results
+assert is_pos_def(M) , "M is not positive definite."
+assert is_pos_def(-A_task-np.dot(B_task,K)) , "A+BK is not Hurwitz"
+
+assert is_pos_def(M - np.dot(C_task.T,C_task)) , "Failed test M >= C'C"
+assert is_pos_def(-2*lmbda*M \
+                  - np.dot((A_task+np.dot(B_task,K)).T,M) \
+                  - np.dot(M,A_task+np.dot(B_task,K)) ) , "Failed test (A+BK)'M+M(A+BK) <= -2lmbdaM"
+
+assert np.all(C_lip == np.dot(C_task,P)) , "Failed test C_lip = C_task*P"
+
+assert np.all( np.dot(P,A_lip) == np.dot(A_task,P) + np.dot(B_task,Q) ) \
+            , "Failed Test P*A_lip = A_task*P+B*Q"
+
 ###############################################
 # MPC formulation
 ###############################################
 
 def perform_template_mpc(t, x_lip_init, x_task_init):
     # Prediction horizon and sampling times
-    N = 50
-    dt = 0.05
+    N = 20
+    dt = 0.1
 
     # MPC parameters
     R_mpc = 100*np.eye(2)   # ZMP tracking penalty
@@ -97,8 +138,7 @@ def perform_template_mpc(t, x_lip_init, x_task_init):
 
     x_task = mp.NewContinuousVariables(9,N,"x_task")    # CoM position and centroidal momentum
     u_task = mp.NewContinuousVariables(6,N-1,"u_task")  # Spatial force on CoM (centroidal momentum dot)
-        
-
+       
     # Initial condition constraints
     mp.AddLinearEqualityConstraint(np.eye(4), x_lip_init, x_lip[:,0])
     mp.AddLinearEqualityConstraint(np.eye(9), x_task_init, x_task[:,0])
@@ -120,10 +160,10 @@ def perform_template_mpc(t, x_lip_init, x_task_init):
                                           x_task[:,i], u_task[:,i], x_task[:,i+1],
                                           dt)
 
-        ## Add interface constraint
-        #A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
-        #x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
-        #mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
+        # Add interface constraint
+        A_interface = np.hstack([R, (Q-np.dot(K,P)), K, -np.eye(6)])
+        x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
+        mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
 
 
     # Add terminal cost
@@ -152,10 +192,13 @@ n_steps = int(sim_time/dt)
 p_zmp_ref = np.zeros((n_steps,2))
 p_zmp_lip = np.zeros((n_steps,2))
 p_com_lip = np.zeros((n_steps,2))
+p_com_task = np.zeros((n_steps,2))
+output_err = np.zeros(n_steps)
+sim_fcn = np.zeros(n_steps)
 
 # Initial conditions
 x_lip = np.zeros((4,1))
-x_task = np.zeros((9,1))
+x_task = np.zeros((9,1)) + 0.01
 
 for i in range(n_steps):
     t = i*dt
@@ -163,19 +206,26 @@ for i in range(n_steps):
     # Perform mpc
     x_lip_traj, u_lip_traj, x_task_traj, u_task_traj = perform_template_mpc(t, x_lip, x_task)
 
-    # Extract control inputs
+    # Extract relevant values
+    x_lip = x_lip_traj[:,0][np.newaxis].T
     u_lip = u_lip_traj[:,0][np.newaxis].T
+    x_task = x_task_traj[:,0][np.newaxis].T
     u_task = u_task_traj[:,0][np.newaxis].T
 
     # Record plottable values
     p_zmp_ref[i,:] = zmp_trajectory.value(t).flatten()
-    p_zmp_lip[i,:] = u_lip_traj[:,0].flatten()
-    p_com_lip[i,:] = x_lip_traj[0:2,0].flatten()
+    p_zmp_lip[i,:] = u_lip.flatten()
+    p_com_lip[i,:] = x_lip[0:2].flatten()
+    p_com_task[i,:] = x_task[0:2].flatten()
+
+    output_err[i] = np.linalg.norm( np.dot(C_lip,x_lip)-np.dot(C_task,x_task) )
+   
+    x_Px = x_task - np.dot(P,x_lip)
+    sim_fcn[i] = np.sqrt( np.dot( np.dot(x_Px.T,M), x_Px) )
 
     # Simulate systems forward in time with Forward Euler
     x_lip = x_lip + dt*(np.dot(A_lip,x_lip) + np.dot(B_lip,u_lip))
     x_task = x_task + dt*(np.dot(A_task,x_task) + np.dot(B_task,u_task))
-
 
 ###############################################
 # Plot Results
@@ -191,9 +241,22 @@ plt.plot(p_zmp_lip[:,0], p_zmp_lip[:,1], label="LIP ZMP")
 plt.plot(p_com_lip[:,0], p_com_lip[:,1], label="LIP CoM")
 
 # Actual (task-space) CoM trajectory
+plt.plot(p_com_task[:,0], p_com_task[:,1], label="Task-space CoM")
 
-
+plt.xlabel("x position")
+plt.ylabel("y position")
 
 plt.legend()
+
+
+# Output error and simulation function
+plt.figure()
+plt.plot(np.arange(0,sim_time,dt),output_err, label="Output Error")
+plt.plot(np.arange(0,sim_time,dt),sim_fcn, label="Simulation Function")
+plt.xlabel("Time")
+
+plt.legend()
+
+
 plt.show()
 
