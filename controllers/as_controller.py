@@ -61,6 +61,7 @@ class ValkyrieASController(ValkyrieQPController):
         interface_mp = MathematicalProgram()
         
         Q_task = np.diag([1000,1000,100, 100,100,10, 2000,2000,10])
+        Q_task = 10*np.eye(9)
         R_task = np.eye(6)
         K, P = LinearQuadraticRegulator(self.A_task, self.B_task, Q_task, R_task)
         self.K = -K
@@ -331,15 +332,15 @@ class ValkyrieASController(ValkyrieQPController):
             mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
 
             # Add contact wrench cone constraint
-            xbar_cwc = np.hstack([x_task[:,i],u_task[:,i]])[np.newaxis].T  # [x_task;u_task]
-            lb_cwc = -np.inf*np.ones(b_cwc.shape) 
-            ub_cwc = b_cwc                        
-            mp.AddLinearConstraint(A_cwc, lb_cwc, ub_cwc, xbar_cwc)
+            #xbar_cwc = np.hstack([x_task[:,i],u_task[:,i]])[np.newaxis].T  # [x_task;u_task]
+            #lb_cwc = -np.inf*np.ones(b_cwc.shape) 
+            #ub_cwc = b_cwc                        
+            #mp.AddLinearConstraint(A_cwc, lb_cwc, ub_cwc, xbar_cwc)
 
-            # Add acceleration bound constraint
-            lb_bnd = -np.inf*np.ones(b_bnd.shape)
-            ub_bnd = b_bnd
-            mp.AddLinearConstraint(A_bnd, lb_bnd, ub_bnd, u_task[:,i])
+            ## Add acceleration bound constraint
+            #lb_bnd = -np.inf*np.ones(b_bnd.shape)
+            #ub_bnd = b_bnd
+            #mp.AddLinearConstraint(A_bnd, lb_bnd, ub_bnd, u_task[:,i])
 
         # Add terminal cost
         mp.AddQuadraticErrorCost(Qf_mpc,np.zeros((2,1)),x_lip[2:4,N-1])
@@ -348,24 +349,23 @@ class ValkyrieASController(ValkyrieQPController):
         solver = OsqpSolver()
         res = solver.Solve(mp,None,None)
 
+        assert res.is_success(), "Template MPC Failed"
+
         u_lip_trajectory = res.GetSolution(u_lip)
         u_task_trajectory = res.GetSolution(u_task)
-        x_task_trajectory = res.GetSolution(x_task)
 
-        return u_lip_trajectory, u_task_trajectory, x_task_trajectory
+        return u_lip_trajectory, u_task_trajectory
 
-    def SolveWholeBodyQP(self, cache, context, q, qd, u_task, x_com_nom, xd_com_nom):
+    def SolveWholeBodyQP(self, cache, context, q, qd, u_task):
         """
         Formulates and solves a quadratic program which attempts to regulate the joints to the desired
         accelerations and center of mass to the desired position as follows:
 
         minimize:
-            w_1* || J_com*qdd + Jd_com*qd - xdd_com_des ||^2 + 
-            w_2* || A*qdd + Ad*qd - hd_com_des ||^2 +
-            w_3* || qdd_des - qdd ||^2 +
-            w_4* || J_left*qdd + Jd_left*qd - xdd_left_des ||^2 +
-            w_4* || J_right*qdd + Jd_right*qd - xdd_right_des ||^2 +
-            w_5* || J_torso*qdd + Jd_torso*qd - rpydd_torso_des ||^2
+            w1* || A*qdd + Ad*qd - u_task ||^2 +
+            w2* || qdd_des - qdd ||^2 +
+            w3* || J_foot*qdd + Jd_foot*qd - xdd_foot_des ||^2 +
+            w4* || J_torso*qdd + Jd_torso*qd - rpydd_torso_des ||^2
         subject to:
                 H*qdd + C = B*tau + sum(J'*f)
                 f \in friction cones
@@ -375,22 +375,16 @@ class ValkyrieASController(ValkyrieQPController):
 
         ############## Tuneable Paramters ################
 
-        w1 = 50.0   # center-of-mass tracking weight
-        w2 = 0.1    # centroid momentum weight
-        w3 = 0.5    # joint tracking weight
-        w4 = 50.0   # foot tracking weight
-        w5 = 50.0   # torso orientation weight
+        w1 = 1.0    # centroid momentum weight
+        w2 = 1.0    # joint tracking weight
+        w3 = 100.0   # foot tracking weight
+        w4 = 10.0   # torso orientation weight
 
         nu_min = -1e-10   # slack for contact constraint
         nu_max = 1e-10
 
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
-
-        Kp_com = 500   # Center of mass PD gains
-        Kd_com = 50
-
-        Kp_h = 10.0    # Centroid momentum P gain
 
         Kp_foot = 100.0   # foot position PD gains
         Kd_foot = 10.0 
@@ -411,12 +405,9 @@ class ValkyrieASController(ValkyrieQPController):
         C = self.tree.dynamicsBiasTerm(cache, {}, True)[np.newaxis].T
         B = self.tree.B
 
-        A = self.tree.centroidalMomentumMatrix(cache)
+        A = self.tree.centroidalMomentumMatrix(cache)              # Centroidal "jacobians"
         Ad_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
 
-        J_com = self.tree.centerOfMassJacobian(cache)    # Center of mass jacobian
-        Jd_qd_com = self.tree.centerOfMassJacobianDotTimesV(cache)[np.newaxis].T
-       
         J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index)  # foot jacobians
         J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index)
 
@@ -433,21 +424,6 @@ class ValkyrieASController(ValkyrieQPController):
         qd_nom = self.nominal_state[self.np:]
         qdd_des = Kp_q*(q_nom-q) + Kd_q*(qd_nom-qd)
         qdd_des = qdd_des[np.newaxis].T
-
-        # Compute desired center of mass acceleration
-        x_com = self.tree.centerOfMass(cache)[np.newaxis].T
-        xd_com = np.dot(J_com, qd)[np.newaxis].T
-        x_com_nom, xd_com_nom, xdd_com_nom = self.fsm.ComTrajectory(context.get_time())
-      
-        xdd_com_des = Kp_com*(x_com_nom-x_com) + Kd_com*(xd_com_nom-xd_com)
-
-        # Compute desired centroid momentum dot
-        h_com = np.dot(A, qd)[np.newaxis].T
-        m = self.tree.massMatrix(cache)[0,0]  # total mass
-        h_com_nom = np.vstack([np.zeros((3,1)),m*xd_com_nom])  # desired angular velocity is zero,
-                                                               # CoM velocity matches the CoM trajectory
-        hd_com_des = Kp_h*(h_com_nom - h_com)
-        #hd_com_des = u_task
 
         # Computed desired accelerations of the feet (at the corner points)
         xdd_left_des, xdd_right_des = self.get_desired_foot_accelerations(cache, 
@@ -474,28 +450,25 @@ class ValkyrieASController(ValkyrieQPController):
        
         f_contact = [self.mp.NewContinuousVariables(3,1,'f_%s'%i) for i in range(num_contacts)]
 
-        # Center of mass tracking cost
-        com_cost = self.AddJacobianTypeCost(J_com, qdd, Jd_qd_com, xdd_com_des, weight=w1)
-
         # Centroidal momentum cost
-        centroidal_cost = self.AddJacobianTypeCost(A, qdd, Ad_qd, hd_com_des, weight=w2)
+        centroidal_cost = self.AddJacobianTypeCost(A, qdd, Ad_qd, u_task[:,0], weight=w1)
        
         # Joint tracking cost
-        joint_cost = self.mp.AddQuadraticErrorCost(Q=w3*np.eye(self.nv),x_desired=qdd_des,vars=qdd)
+        joint_cost = self.mp.AddQuadraticErrorCost(Q=w2*np.eye(self.nv),x_desired=qdd_des,vars=qdd)
 
         # Foot tracking costs: add a cost for each corner of the foot
         corners = self.get_foot_contact_points()
         for i in range(len(corners)):
             # Left foot tracking cost for this corner
             J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index, relative_position=corners[i])
-            self.AddJacobianTypeCost(J_left, qdd, Jd_qd_left, xdd_left_des[i], weight=w4)
+            self.AddJacobianTypeCost(J_left, qdd, Jd_qd_left, xdd_left_des[i], weight=w3)
 
             # Right foot tracking cost
             J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index, relative_position=corners[i])
-            self.AddJacobianTypeCost(J_right, qdd, Jd_qd_right, xdd_right_des[i], weight=w4)
+            self.AddJacobianTypeCost(J_right, qdd, Jd_qd_right, xdd_right_des[i], weight=w3)
         
         # torso orientation cost
-        torso_cost = self.AddJacobianTypeCost(J_torso, qdd, Jd_qd_torso, rpydd_torso_des, weight=w5)
+        torso_cost = self.AddJacobianTypeCost(J_torso, qdd, Jd_qd_torso, rpydd_torso_des, weight=w4)
             
         # Contact acceleration constraint
         for j in range(num_contacts):
@@ -519,123 +492,9 @@ class ValkyrieASController(ValkyrieQPController):
         # Solve the QP
         result = Solve(self.mp)
 
-        assert result.is_success()
+        assert result.is_success(), "Whole-body QP Failed"
 
         return result.GetSolution(tau)
-
-    #def SolveWholeBodyQP(self, cache, context, q, qd, u_task):
-    #    """
-    #    Use a whole-body quadratic program to feedback linearize the task-space
-    #    dynamics.
-    #    """
-
-    #    ############## Tuneable Paramters ################
-
-    #    Kp_q = 10    # Joint angle PD gains
-    #    Kd_q = 10
-
-    #    Kp_foot = 00.0   # foot position PD gains
-    #    Kd_foot = 100.0 
-    #    
-    #    Kd_contact = 100.0  # Contact movement damping P gain
-
-    #    w1 = 100.1   # joint tracking weight
-    #    w2 = 50.0    # foot tracking weight
-    #    w3 = 100.0    # Centroidal momentum tracking weight
-
-    #    nu_min = -0.1   # slack for contact constraint
-    #    nu_max = 0.1
-
-    #    ##################################################
-
-    #    # Compute desired joint acclerations
-    #    q_nom = self.nominal_state[0:self.np]
-    #    qd_nom = self.nominal_state[self.np:]
-    #    qdd_des = Kp_q*(q_nom-q) + Kd_q*(qd_nom-qd)
-    #    qdd_des = qdd_des[np.newaxis].T
-
-    #    # Computed desired accelerations of the feet (at the corner points)
-    #    xdd_left_des, xdd_right_des = self.get_desired_foot_accelerations(cache, 
-    #                                                                      context.get_time(), 
-    #                                                                      qd, 
-    #                                                                      Kp_foot, Kd_foot)
-    #    # Specify support phase
-    #    support = self.fsm.SupportPhase(context.get_time())
-    #   
-    #    # Compute dynamic quantities. Note that we cast vectors as nx1 numpy arrays to allow
-    #    # for matrix multiplication with np.dot().
-    #    H = self.tree.massMatrix(cache)                  # Equations of motion
-    #    C = self.tree.dynamicsBiasTerm(cache, {}, True)[np.newaxis].T
-    #    B = self.tree.B
-
-    #    A = self.tree.centroidalMomentumMatrix(cache)
-    #    Ad_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
-
-    #    J_com = self.tree.centerOfMassJacobian(cache)    # Center of mass jacobian
-    #    Jd_qd_com = self.tree.centerOfMassJacobianDotTimesV(cache)[np.newaxis].T
-    #   
-    #    J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index)  # foot jacobians
-    #    J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index)
-
-    #    contact_jacobians, contact_jacobians_dot_v = self.get_contact_jacobians(cache, support)
-    #    num_contacts = len(contact_jacobians)
-    #    
-    #    ################## QP Formulation #################
-    #    
-    #    self.mp = MathematicalProgram()
-    #    
-    #    # create optimization variables
-    #    qdd = self.mp.NewContinuousVariables(self.nv, 1, 'qdd')   # joint accelerations
-    #    tau = self.mp.NewContinuousVariables(self.nu, 1, 'tau')   # applied torques
-    #   
-    #    f_contact = [self.mp.NewContinuousVariables(3,1,'f_%s'%i) for i in range(num_contacts)]
-
-    #    # Joint tracking cost
-    #    joint_cost = self.mp.AddQuadraticErrorCost(Q=w1*np.eye(self.nv),x_desired=qdd_des,vars=qdd)
-
-    #    # Foot tracking costs: add a cost for each corner of the foot
-    #    corners = self.get_foot_contact_points()
-    #    for i in range(len(corners)):
-    #        # Left foot tracking cost for this corner
-    #        J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index, relative_position=corners[i])
-    #        self.AddJacobianTypeCost(J_left, qdd, Jd_qd_left, xdd_left_des[i], weight=w2)
-
-    #        # Right foot tracking cost
-    #        J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index, relative_position=corners[i])
-    #        self.AddJacobianTypeCost(J_right, qdd, Jd_qd_right, xdd_right_des[i], weight=w2)
-    #        
-    #    # Centroidal momentum cost
-    #    hd_com_des = u_task[:,0]
-    #    #centroidal_constraint = self.AddJacobianTypeConstraint(A, qdd, Ad_qd, hd_com_des)
-    #    centroidal_cost = self.AddJacobianTypeCost(A, qdd, Ad_qd, hd_com_des, weight=w3)
-    #   
-    #    # Contact acceleration constraint
-    #    for j in range(num_contacts):
-    #        J_cont = contact_jacobians[j]
-    #        Jd_qd_cont = contact_jacobians_dot_v[j]
-    #        xd_cont = np.dot(J_cont,qd)[np.newaxis].T
-    #        #xdd_cont_des = -Kd_contact*xd_cont
-    #        xdd_cont_des = 0
-
-    #        contact_constraint = self.AddJacobianTypeConstraint(J_cont, qdd, Jd_qd_cont, xdd_cont_des)
- 
-    #        # add some slight flexibility to this constraint to avoid infeasibility
-    #        contact_constraint.evaluator().UpdateUpperBound(nu_max*np.array([1.0,1.0,1.0]))
-    #        contact_constraint.evaluator().UpdateLowerBound(nu_min*np.array([1.0,1.0,1.0]))
-    #   
-    #    # Dynamic constraints 
-    #    dynamics_constraint = self.AddDynamicsConstraint(H, qdd, C, B, tau, contact_jacobians, f_contact)
-
-    #    # Friction cone (really pyramid) constraints 
-    #    friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
-
-    #    # Solve the QP
-    #    solver = OsqpSolver()
-    #    result = solver.Solve(self.mp,None,None)
-    #    assert result.is_success(), "Whole-body QP Infeasible!"
-    #    tau = result.GetSolution(tau)
-
-    #    return tau
 
     def DoCalcVectorOutput(self, context, state, unused, output):
         """
@@ -651,15 +510,12 @@ class ValkyrieASController(ValkyrieQPController):
         x_task = self.GetTaskSpaceState(cache, q, qd)
 
         # Generate a template trajectory that respects whole-body CWC constraints
-        u_lip_traj, u_task_traj, x_task_traj = self.DoTemplateMPC(context.get_time(), x_lip, x_task)
+        u_lip_traj, u_task_traj = self.DoTemplateMPC(context.get_time(), x_lip, x_task)
         u_lip = u_lip_traj[:,0][np.newaxis].T
         u_task = u_task_traj[:,0][np.newaxis].T
-        x_com_nom = x_task_traj[0:3,1][np.newaxis].T
-        xd_com_nom = 1/self.m*x_task_traj[6:9,1][np.newaxis].T
-
 
         # Feedback linearize with a whole-body QP to get desired torques
-        tau = self.SolveWholeBodyQP(cache, context, q, qd, u_task, x_com_nom, xd_com_nom)
+        tau = self.SolveWholeBodyQP(cache, context, q, qd, u_task)#, x_com_nom, xd_com_nom)
 
         # Simulate the template forward in time (simple forward Euler)
         self.x_lip += (np.dot(self.A_lip,self.x_lip) + np.dot(self.B_lip, u_lip))*self.dt
