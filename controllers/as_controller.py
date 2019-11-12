@@ -21,7 +21,7 @@ class ValkyrieASController(ValkyrieQPController):
                               step_length=0.5,
                               step_height=0.05,
                               step_time=1.0)
-        #self.fsm = StandingFSM()
+        self.fsm = StandingFSM()
 
         # Parameters
         h = 0.967
@@ -29,8 +29,9 @@ class ValkyrieASController(ValkyrieQPController):
         omega = np.sqrt(g/h)
         m = get_total_mass(tree)
         self.m = m
+        self.mu = 0.5
 
-        self.l_max = 100.0   # maximum linear momentum of the CoM for CWC linearization
+        self.l_max = 0.5*m   # maximum linear momentum of the CoM for CWC linearization
 
         # Wrench on the CoM due to gravity
         self.w_mg = np.array([0,0,0,0,0,-m*g])[np.newaxis].T
@@ -60,9 +61,8 @@ class ValkyrieASController(ValkyrieQPController):
         # between the template and the anchor
         interface_mp = MathematicalProgram()
         
-        Q_task = np.diag([1000,1000,100, 100,100,10, 2000,2000,10])
         Q_task = 10*np.eye(9)
-        R_task = np.eye(6)
+        R_task = 1*np.eye(6)
         K, P = LinearQuadraticRegulator(self.A_task, self.B_task, Q_task, R_task)
         self.K = -K
 
@@ -106,17 +106,6 @@ class ValkyrieASController(ValkyrieQPController):
                                [0.0],   # y position
                                [0.0],   # x velocity
                                [0.0]])  # y velocity
-
-    def comForceTransform(self, cache):
-        """
-        Returns the 6x6 matrix O_Xf_com that transforms
-        forces in the center of mass frame to the world frame
-        """
-        p_com = self.tree.centerOfMass(cache).flatten()
-        O_Xf_com = np.eye(6)
-        O_Xf_com[0:3,3:6] = S(p_com)
-
-        return O_Xf_com
 
     def GetTaskSpaceState(self, cache, q, qd):
         """
@@ -284,15 +273,11 @@ class ValkyrieASController(ValkyrieQPController):
         in the template model while respecting contact constraints for the full model.
         """
         # Prediction horizon and sampling time
-        N = 20
-        dt = 0.1
-
-        # Get linearized contact constraints
-        A_cwc, b_cwc = self.ComputeLinearizedContactConstraint(t)
-        A_bnd, b_bnd = self.ComputeAccelerationBoundConstraint()
-
+        N = 10
+        dt = 0.2
+            
         # MPC Parameters
-        R_mpc = 100*np.eye(2)      # ZMP tracking penalty
+        R_mpc = 10*np.eye(2)      # ZMP tracking penalty
         Q_mpc = np.eye(2)          # CoM velocity penalty
         Qf_mpc = 10*np.eye(2)      # Final CoM velocity penalty
 
@@ -307,8 +292,8 @@ class ValkyrieASController(ValkyrieQPController):
         u_task = mp.NewContinuousVariables(6,N-1,"u_task")  # Spatial force on CoM (centroidal momentum dot)
         
         # Initial condition constraints
-        mp.AddLinearEqualityConstraint(np.eye(4), x_lip_init, x_lip[:,0])
         mp.AddLinearEqualityConstraint(np.eye(9), x_task_init, x_task[:,0])
+        mp.AddLinearEqualityConstraint(np.eye(4), x_lip_init, x_lip[:,0])
 
         for i in range(N-1):
             # Add Running Costs
@@ -329,27 +314,34 @@ class ValkyrieASController(ValkyrieQPController):
             # Add interface constraint
             A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
             x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
-            mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
+            interface_con = mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
 
+            # Get linearized contact constraints
+            A_cwc, b_cwc = self.ComputeLinearizedContactConstraint(t+i*dt)
+            A_bnd, b_bnd = self.ComputeAccelerationBoundConstraint()
+        
             # Add contact wrench cone constraint
-            #xbar_cwc = np.hstack([x_task[:,i],u_task[:,i]])[np.newaxis].T  # [x_task;u_task]
-            #lb_cwc = -np.inf*np.ones(b_cwc.shape) 
-            #ub_cwc = b_cwc                        
-            #mp.AddLinearConstraint(A_cwc, lb_cwc, ub_cwc, xbar_cwc)
+            xbar_cwc = np.hstack([x_task[:,i],u_task[:,i]])[np.newaxis].T  # [x_task;u_task]
+            lb_cwc = -np.inf*np.ones(b_cwc.shape) 
+            ub_cwc = b_cwc                        
+            mp.AddLinearConstraint(A_cwc, lb_cwc, ub_cwc, xbar_cwc)
 
-            ## Add acceleration bound constraint
-            #lb_bnd = -np.inf*np.ones(b_bnd.shape)
-            #ub_bnd = b_bnd
-            #mp.AddLinearConstraint(A_bnd, lb_bnd, ub_bnd, u_task[:,i])
+            # Add acceleration bound constraint
+            lb_bnd = -np.inf*np.ones(b_bnd.shape)
+            ub_bnd = b_bnd
+            mp.AddLinearConstraint(A_bnd, lb_bnd, ub_bnd, u_task[:,i])
 
         # Add terminal cost
         mp.AddQuadraticErrorCost(Qf_mpc,np.zeros((2,1)),x_lip[2:4,N-1])
-            
+
         # Solve the QP
         solver = OsqpSolver()
+        #solver = IpoptSolver()
         res = solver.Solve(mp,None,None)
 
         assert res.is_success(), "Template MPC Failed"
+        if not res.is_success():
+            print("Template MPC Failed!")
 
         u_lip_trajectory = res.GetSolution(u_lip)
         u_task_trajectory = res.GetSolution(u_task)
