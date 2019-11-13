@@ -31,7 +31,7 @@ class ValkyrieASController(ValkyrieQPController):
         self.m = m
         self.mu = 0.5
 
-        self.l_max = 0.5*m   # maximum linear momentum of the CoM for CWC linearization
+        self.l_max = 0.58*m   # maximum linear momentum of the CoM for CWC linearization
 
         # Wrench on the CoM due to gravity
         self.w_mg = np.array([0,0,0,0,0,-m*g])[np.newaxis].T
@@ -294,10 +294,6 @@ class ValkyrieASController(ValkyrieQPController):
         # Initial condition constraints
         init_task_constraint = mp.AddLinearEqualityConstraint(np.eye(9), x_task_init, x_task[:,0])
         init_lip_constraint  = mp.AddLinearEqualityConstraint(np.eye(4), x_lip_init, x_lip[:,0])
-            
-        # add some slight flexibility to the initial task-space constraint to avoid infeasibility
-        #init_task_constraint.evaluator().UpdateUpperBound(1e-1*np.ones(x_task[:,0].shape))
-        #init_task_constraint.evaluator().UpdateLowerBound(-1e-1*np.ones(x_task[:,0].shape))
 
         for i in range(N-1):
             # Add Running Costs
@@ -315,13 +311,13 @@ class ValkyrieASController(ValkyrieQPController):
                                                   x_task[:,i], u_task[:,i], x_task[:,i+1],
                                                   dt)
 
-            #task_dynamics_cons.evaluator().UpdateUpperBound(1e-5*np.ones(9))
-            #task_dynamics_cons.evaluator().UpdateLowerBound(-1e-5*np.ones(9))
-            
             # Add interface constraint
             A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
             x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
             interface_con = mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
+            
+            interface_con.evaluator().UpdateUpperBound(1*np.ones(6))
+            interface_con.evaluator().UpdateLowerBound(-1*np.ones(6))
             
         for i in range(2,N-1):
             # Get linearized contact constraints
@@ -376,9 +372,9 @@ class ValkyrieASController(ValkyrieQPController):
         ############## Tuneable Paramters ################
 
         w1 = 1.0    # centroid momentum weight
-        w2 = 1.0    # joint tracking weight
+        w2 = 10.0    # joint tracking weight
         w3 = 100.0   # foot tracking weight
-        w4 = 10.0   # torso orientation weight
+        w4 = 100.0   # torso orientation weight
 
         nu_min = -1e-10   # slack for contact constraint
         nu_max = 1e-10
