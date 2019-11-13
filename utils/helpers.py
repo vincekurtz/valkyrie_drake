@@ -22,7 +22,7 @@ def AddForwardEulerDynamicsConstraint(mp, A, B, x, u, xnext, dt):
     beq = np.zeros((n,1))
     xeq = np.hstack([ x, u, xnext])[np.newaxis].T
 
-    mp.AddLinearEqualityConstraint(Aeq,beq,xeq)
+    return mp.AddLinearEqualityConstraint(Aeq,beq,xeq)
 
 def S(a):
     """

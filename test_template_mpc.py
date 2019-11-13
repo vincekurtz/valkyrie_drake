@@ -52,7 +52,7 @@ x_task = np.asarray([p_com_init[0,0],p_com_init[1,0],1,0,0,0,0,0,0])[np.newaxis]
 u_lip_traj, u_task_traj = c.DoTemplateMPC(0, x_lip, x_task)
 
 n_steps = u_lip_traj.shape[1]
-dt = 0.2
+dt = 0.1
 sim_time = n_steps*dt -0.1
 
 # For storing results
