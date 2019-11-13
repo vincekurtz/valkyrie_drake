@@ -43,12 +43,17 @@ def test_CWC(A_cwc, b_cwc):
     if not res.is_success():
         print("Infeasible CWC Constraint!")
 
+# Initial conditions
+p_com_init = c.fsm.zmp_trajectory.value(0)  # [x,y]
+x_lip = np.asarray([p_com_init[0,0],p_com_init[1,0],0.0,0.0])[np.newaxis].T + 0.005
+x_task = np.asarray([p_com_init[0,0],p_com_init[1,0],1,0,0,0,0,0,0])[np.newaxis].T + 0.01
 
-# Simulate and call DoTemplateMPC to get the control input
+# Perform mpc
+u_lip_traj, u_task_traj = c.DoTemplateMPC(0, x_lip, x_task)
 
-sim_time = 10
-dt = 0.05
-n_steps = int(sim_time/dt)
+n_steps = u_lip_traj.shape[1]
+dt = 0.2
+sim_time = n_steps*dt -0.1
 
 # For storing results
 p_zmp_ref = np.zeros((n_steps,2))
@@ -58,21 +63,14 @@ p_com_task = np.zeros((n_steps,2))
 output_err = np.zeros(n_steps)
 sim_fcn = np.zeros(n_steps)
 
-# Initial conditions
-p_com_init = c.fsm.zmp_trajectory.value(0)  # [x,y]
-x_lip = np.asarray([p_com_init[0,0],p_com_init[1,0],0.0,0.0])[np.newaxis].T + 0.005
-x_task = np.asarray([p_com_init[0,0],p_com_init[1,0],1,0,0,0,0,0,0])[np.newaxis].T + 0.01
-
+# Simulate forward
 for i in range(n_steps):
     t = i*dt
     print(t)
 
-    # Perform mpc
-    u_lip_traj, u_task_traj = c.DoTemplateMPC(t, x_lip, x_task)
-
     # Extract relevant values
-    u_lip = u_lip_traj[:,0][np.newaxis].T
-    u_task = u_task_traj[:,0][np.newaxis].T
+    u_lip = u_lip_traj[:,i][np.newaxis].T
+    u_task = u_task_traj[:,i][np.newaxis].T
 
     # Record plottable values
     p_zmp_ref[i,:] = c.fsm.zmp_trajectory.value(t).flatten()
@@ -116,9 +114,10 @@ plt.plot(p_com_task[:,0], p_com_task[:,1], label="Task-space CoM")
 
 plt.xlabel("x position")
 plt.ylabel("y position")
+plt.xlim(-0.2,0.8)
+plt.ylim(-0.2,0.2)
 
 plt.legend()
-
 
 # Output error and simulation function
 plt.figure()

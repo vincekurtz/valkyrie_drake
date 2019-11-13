@@ -21,7 +21,7 @@ class ValkyrieASController(ValkyrieQPController):
                               step_length=0.5,
                               step_height=0.05,
                               step_time=1.0)
-        self.fsm = StandingFSM()
+        #self.fsm = StandingFSM()
 
         # Parameters
         h = 0.967
@@ -273,13 +273,13 @@ class ValkyrieASController(ValkyrieQPController):
         in the template model while respecting contact constraints for the full model.
         """
         # Prediction horizon and sampling time
-        N = 10
+        N = 50
         dt = 0.2
             
         # MPC Parameters
-        R_mpc = 10*np.eye(2)      # ZMP tracking penalty
-        Q_mpc = np.eye(2)          # CoM velocity penalty
-        Qf_mpc = 10*np.eye(2)      # Final CoM velocity penalty
+        R_mpc = 40*np.eye(2)      # ZMP tracking penalty
+        Q_mpc = 10*np.eye(2)          # CoM velocity penalty
+        Qf_mpc = 1000*np.eye(2)      # Final CoM velocity penalty
 
         # Set up a Drake MathematicalProgram
         mp = MathematicalProgram()
@@ -292,8 +292,12 @@ class ValkyrieASController(ValkyrieQPController):
         u_task = mp.NewContinuousVariables(6,N-1,"u_task")  # Spatial force on CoM (centroidal momentum dot)
         
         # Initial condition constraints
-        mp.AddLinearEqualityConstraint(np.eye(9), x_task_init, x_task[:,0])
-        mp.AddLinearEqualityConstraint(np.eye(4), x_lip_init, x_lip[:,0])
+        init_task_constraint = mp.AddLinearEqualityConstraint(np.eye(9), x_task_init, x_task[:,0])
+        init_lip_constraint  = mp.AddLinearEqualityConstraint(np.eye(4), x_lip_init, x_lip[:,0])
+            
+        # add some slight flexibility to the initial task-space constraint to avoid infeasibility
+        init_task_constraint.evaluator().UpdateUpperBound(1e-20*np.ones(x_task[:,0].shape))
+        init_task_constraint.evaluator().UpdateLowerBound(-1e-20*np.ones(x_task[:,0].shape))
 
         for i in range(N-1):
             # Add Running Costs
@@ -345,6 +349,10 @@ class ValkyrieASController(ValkyrieQPController):
 
         u_lip_trajectory = res.GetSolution(u_lip)
         u_task_trajectory = res.GetSolution(u_task)
+
+        print(res.GetSolution(x_task[:,0]))
+        print(x_task_init)
+        print("")
 
         return u_lip_trajectory, u_task_trajectory
 
