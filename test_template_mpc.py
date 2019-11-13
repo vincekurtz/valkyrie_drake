@@ -43,17 +43,9 @@ def test_CWC(A_cwc, b_cwc):
     if not res.is_success():
         print("Infeasible CWC Constraint!")
 
-# Initial conditions
-p_com_init = c.fsm.zmp_trajectory.value(0)  # [x,y]
-x_lip = np.asarray([p_com_init[0,0],p_com_init[1,0],0.0,0.0])[np.newaxis].T + 0.005
-x_task = np.asarray([p_com_init[0,0],p_com_init[1,0],1,0,0,0,0,0,0])[np.newaxis].T + 0.01
-
-# Perform mpc
-u_lip_traj, u_task_traj = c.DoTemplateMPC(0, x_lip, x_task)
-
-n_steps = u_lip_traj.shape[1]
-dt = 0.1
-sim_time = n_steps*dt -0.1
+sim_time = 10
+dt = 0.05
+n_steps = int(sim_time/dt)
 
 # For storing results
 p_zmp_ref = np.zeros((n_steps,2))
@@ -63,14 +55,21 @@ p_com_task = np.zeros((n_steps,2))
 output_err = np.zeros(n_steps)
 sim_fcn = np.zeros(n_steps)
 
-# Simulate forward
+# Initial conditions
+p_com_init = c.fsm.zmp_trajectory.value(0)  # [x,y]
+x_lip = np.asarray([p_com_init[0,0],p_com_init[1,0],0.0,0.0])[np.newaxis].T + 0.005
+x_task = np.asarray([p_com_init[0,0],p_com_init[1,0],1,0,0,0,0,0,0])[np.newaxis].T + 0.01
+
 for i in range(n_steps):
     t = i*dt
     print(t)
 
+    # Perform mpc
+    u_lip_traj, u_task_traj = c.DoTemplateMPC(t, x_lip, x_task)
+
     # Extract relevant values
-    u_lip = u_lip_traj[:,i][np.newaxis].T
-    u_task = u_task_traj[:,i][np.newaxis].T
+    u_lip = u_lip_traj[:,0][np.newaxis].T
+    u_task = u_task_traj[:,0][np.newaxis].T
 
     # Record plottable values
     p_zmp_ref[i,:] = c.fsm.zmp_trajectory.value(t).flatten()
@@ -83,18 +82,9 @@ for i in range(n_steps):
     x_Px = x_task - np.dot(c.P,x_lip)
     sim_fcn[i] = np.sqrt( np.dot( np.dot(x_Px.T,c.M), x_Px) )
 
-    # Test CWC constraint
-    A_cwc, b_cwc = c.ComputeLinearizedContactConstraint(t)
-    test_CWC(A_cwc,b_cwc)
-
-    #Ax_cwc = np.dot(A_cwc,np.vstack([x_task,u_task]))
-    #err = Ax_cwc -b_cwc
-
-
     # Simulate systems forward in time with Forward Euler
     x_lip = x_lip + dt*(np.dot(c.A_lip,x_lip) + np.dot(c.B_lip,u_lip))
     x_task = x_task + dt*(np.dot(c.A_task,x_task) + np.dot(c.B_task,u_task))
-
 
 ###############################################
 # Plot Results

@@ -273,13 +273,13 @@ class ValkyrieASController(ValkyrieQPController):
         in the template model while respecting contact constraints for the full model.
         """
         # Prediction horizon and sampling time
-        N = 50
-        dt = 0.2
+        N = 5
+        dt = 0.4
             
         # MPC Parameters
-        R_mpc = 40*np.eye(2)      # ZMP tracking penalty
-        Q_mpc = 10*np.eye(2)          # CoM velocity penalty
-        Qf_mpc = 1000*np.eye(2)      # Final CoM velocity penalty
+        R_mpc = 10*np.eye(2)      # ZMP tracking penalty
+        Q_mpc = 1*np.eye(2)          # CoM velocity penalty
+        Qf_mpc = 10*np.eye(2)      # Final CoM velocity penalty
 
         # Set up a Drake MathematicalProgram
         mp = MathematicalProgram()
@@ -296,8 +296,8 @@ class ValkyrieASController(ValkyrieQPController):
         init_lip_constraint  = mp.AddLinearEqualityConstraint(np.eye(4), x_lip_init, x_lip[:,0])
             
         # add some slight flexibility to the initial task-space constraint to avoid infeasibility
-        init_task_constraint.evaluator().UpdateUpperBound(1e-20*np.ones(x_task[:,0].shape))
-        init_task_constraint.evaluator().UpdateLowerBound(-1e-20*np.ones(x_task[:,0].shape))
+        #init_task_constraint.evaluator().UpdateUpperBound(1e-1*np.ones(x_task[:,0].shape))
+        #init_task_constraint.evaluator().UpdateLowerBound(-1e-1*np.ones(x_task[:,0].shape))
 
         for i in range(N-1):
             # Add Running Costs
@@ -311,20 +311,24 @@ class ValkyrieASController(ValkyrieQPController):
                                                   dt)
 
             # Add dynamic constraints for the task space
-            AddForwardEulerDynamicsConstraint(mp, self.A_task, self.B_task, 
+            task_dynamics_cons = AddForwardEulerDynamicsConstraint(mp, self.A_task, self.B_task, 
                                                   x_task[:,i], u_task[:,i], x_task[:,i+1],
                                                   dt)
 
+            #task_dynamics_cons.evaluator().UpdateUpperBound(1e-5*np.ones(9))
+            #task_dynamics_cons.evaluator().UpdateLowerBound(-1e-5*np.ones(9))
+            
             # Add interface constraint
             A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
             x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
             interface_con = mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
-
+            
+        for i in range(2,N-1):
             # Get linearized contact constraints
             A_cwc, b_cwc = self.ComputeLinearizedContactConstraint(t+i*dt)
             A_bnd, b_bnd = self.ComputeAccelerationBoundConstraint()
-        
-            # Add contact wrench cone constraint
+
+	    # Add contact wrench cone constraint
             xbar_cwc = np.hstack([x_task[:,i],u_task[:,i]])[np.newaxis].T  # [x_task;u_task]
             lb_cwc = -np.inf*np.ones(b_cwc.shape) 
             ub_cwc = b_cwc                        
@@ -349,10 +353,6 @@ class ValkyrieASController(ValkyrieQPController):
 
         u_lip_trajectory = res.GetSolution(u_lip)
         u_task_trajectory = res.GetSolution(u_task)
-
-        print(res.GetSolution(x_task[:,0]))
-        print(x_task_init)
-        print("")
 
         return u_lip_trajectory, u_task_trajectory
 
