@@ -126,7 +126,7 @@ assert np.all( np.dot(P,A_lip) == np.dot(A_task,P) + np.dot(B_task,Q) ) \
 
 def perform_template_mpc(t, x_lip_init, x_task_init):
     # Prediction horizon and sampling times
-    N = 20
+    N = 50
     dt = 0.1
 
     # MPC parameters
@@ -165,18 +165,41 @@ def perform_template_mpc(t, x_lip_init, x_task_init):
                                           x_task[:,i], u_task[:,i], x_task[:,i+1],
                                           dt)
 
+        # Simulation function
+        x_lip_i = x_lip[:,i][np.newaxis].T    # keep as (nx1) numpy arrays
+        u_lip_i = u_lip[:,i][np.newaxis].T
+        x_task_i = x_task[:,i][np.newaxis].T
+        u_task_i = u_task[:,i][np.newaxis].T
+
+        xPx = x_task_i - np.dot(P,x_lip_i)
+        V = np.dot(np.dot(xPx.T,M),xPx)  # (x_task - P*x_lip)'*M*(x_task-P*x_lip)
+
+        # Time derivative of simulation function
+        dV_dxtask = Jacobian(V,x_task_i)
+        dV_dxlip = Jacobian(V,x_lip_i)
+
+        xlip_dot = np.dot(A_lip,x_lip_i) + np.dot(B_lip,u_lip_i)
+        xtask_dot = np.dot(A_task,x_task_i) + np.dot(B_task,u_task_i)
+
+        Vdot = np.dot(dV_dxlip,xlip_dot) + np.dot(dV_dxtask,xtask_dot)
+
+        # Add relaxed interface constraint
+        mp.AddConstraint(Vdot[0,0] <= -lmbda*V[0,0])
+
         # Add interface constraint
-        A_interface = np.hstack([R, (Q-np.dot(K,P)), K, -np.eye(6)])
-        x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
-        mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
+        #A_interface = np.hstack([R, (Q-np.dot(K,P)), K, -np.eye(6)])
+        #x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
+        #mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
 
 
     # Add terminal cost
     mp.AddQuadraticErrorCost(Qf_mpc,np.zeros((2,1)),x_lip[2:4,N-1])  # Penalize CoM accelrations
         
     # Solve the QP
-    solver = OsqpSolver()
-    res = solver.Solve(mp,None,None)
+    #solver = OsqpSolver()
+    #res = solver.Solve(mp,None,None)
+    res = Solve(mp)
+    print(res.get_solver_id().name())
 
     x_lip_traj = res.GetSolution(x_lip)
     u_lip_traj = res.GetSolution(u_lip)
@@ -190,8 +213,11 @@ def perform_template_mpc(t, x_lip_init, x_task_init):
 ###############################################
 
 sim_time = step_time*zmp_ref.shape[1]
-dt = 0.05
+sim_time = 10.0
+dt = 0.1
 n_steps = int(sim_time/dt)
+
+print(n_steps)
 
 # For storing results
 p_zmp_ref = np.zeros((n_steps,2))
@@ -205,32 +231,56 @@ sim_fcn = np.zeros(n_steps)
 x_lip = np.zeros((4,1))
 x_task = np.zeros((9,1)) + 0.01
 
-for i in range(n_steps):
-    t = i*dt
+# one solve version
+x_lip_traj, u_lip_traj, x_task_traj, u_task_traj = perform_template_mpc(0, x_lip, x_task)
 
-    # Perform mpc
-    x_lip_traj, u_lip_traj, x_task_traj, u_task_traj = perform_template_mpc(t, x_lip, x_task)
+p_com_lip = x_lip_traj[0:2,:].T
+p_com_task = x_task_traj[0:2,:].T
+p_zmp_lip = u_lip_traj[0:2,:].T
+p_zmp_ref = np.zeros(p_zmp_lip.shape)
 
-    # Extract relevant values
-    x_lip = x_lip_traj[:,0][np.newaxis].T
-    u_lip = u_lip_traj[:,0][np.newaxis].T
-    x_task = x_task_traj[:,0][np.newaxis].T
-    u_task = u_task_traj[:,0][np.newaxis].T
-
-    # Record plottable values
+for i in range(p_zmp_lip.shape[0]):
+    t = i*0.1  # dt from MPC solver
     p_zmp_ref[i,:] = zmp_trajectory.value(t).flatten()
-    p_zmp_lip[i,:] = u_lip.flatten()
-    p_com_lip[i,:] = x_lip[0:2].flatten()
-    p_com_task[i,:] = x_task[0:2].flatten()
+    
+    x_lip = x_lip_traj[:,i][np.newaxis].T
+    u_lip = u_lip_traj[:,i][np.newaxis].T
+    x_task = x_task_traj[:,i][np.newaxis].T
+    u_task = u_task_traj[:,i][np.newaxis].T
 
     output_err[i] = np.linalg.norm( np.dot(C_lip,x_lip)-np.dot(C_task,x_task) )
    
     x_Px = x_task - np.dot(P,x_lip)
     sim_fcn[i] = np.sqrt( np.dot( np.dot(x_Px.T,M), x_Px) )
 
-    # Simulate systems forward in time with Forward Euler
-    x_lip = x_lip + dt*(np.dot(A_lip,x_lip) + np.dot(B_lip,u_lip))
-    x_task = x_task + dt*(np.dot(A_task,x_task) + np.dot(B_task,u_task))
+
+# Series of solves version
+#for i in range(n_steps):
+#    t = i*dt
+#
+#    # Perform mpc
+#    x_lip_traj, u_lip_traj, x_task_traj, u_task_traj = perform_template_mpc(t, x_lip, x_task)
+#
+#    # Extract relevant values
+#    x_lip = x_lip_traj[:,0][np.newaxis].T
+#    u_lip = u_lip_traj[:,0][np.newaxis].T
+#    x_task = x_task_traj[:,0][np.newaxis].T
+#    u_task = u_task_traj[:,0][np.newaxis].T
+#
+#    # Record plottable values
+#    p_zmp_ref[i,:] = zmp_trajectory.value(t).flatten()
+#    p_zmp_lip[i,:] = u_lip.flatten()
+#    p_com_lip[i,:] = x_lip[0:2].flatten()
+#    p_com_task[i,:] = x_task[0:2].flatten()
+#
+#    output_err[i] = np.linalg.norm( np.dot(C_lip,x_lip)-np.dot(C_task,x_task) )
+#   
+#    x_Px = x_task - np.dot(P,x_lip)
+#    sim_fcn[i] = np.sqrt( np.dot( np.dot(x_Px.T,M), x_Px) )
+#
+#    # Simulate systems forward in time with Forward Euler
+#    x_lip = x_lip + dt*(np.dot(A_lip,x_lip) + np.dot(B_lip,u_lip))
+#    x_task = x_task + dt*(np.dot(A_task,x_task) + np.dot(B_task,u_task))
 
 
 ###############################################
