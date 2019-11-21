@@ -8,6 +8,51 @@ import time
 import numpy as np
 import cdd
 
+def AddQuadraticConstraint(mp, Q, b, c, x):
+    """
+    Add a quadratic constraint to the given Drake mathematical program mp,
+
+        x'*Q*x + b'*x + c <= 0.
+
+    Works by reformulating the constraint as a Lorenz cone constraint,
+    which Drake's MathematicalProgram interface can handle. 
+    """
+
+    # Note and check relevant dimensions
+    n = x.shape[0]
+    assert x.shape == (n,1) , "x must by nx1 numpy array"
+    assert Q.shape == (n,n) , "Q must be nxn numpy array"
+    assert b.shape == (n,1) , "b must be nx1 numpy array"
+    assert isinstance(c, (int, long, float)) or c.size == 1 , "c must be a scalar"
+
+    # Take cholesky decomposition Q = A'*A
+    A = np.linalg.cholesky(Q).T
+
+    # Compute relevant inverses
+    Ainv = np.linalg.inv(A)
+    Qinv = np.dot(Ainv,Ainv.T)
+
+    # Quick feasibility check
+    bQinvb = np.dot(np.dot(b.T,Qinv),b)
+    assert 0.5*bQinvb >= c , "Quadratic constraint probably infeasible, 1/2*b'*Q^{-1}*b - c < 0"
+
+    # Now we'll define a linear transformation from x to z, 
+    #    z = Fx + g 
+    # such that we have the equivalent constraint
+    #
+    #    z_0 >= \sqrt{ z_1^2 + z_2^2 + ... }.
+
+    F = np.vstack([ np.zeros((1,n)),  # [ 0 ]
+                    A             ])  # [ A ]
+
+    g = np.vstack([ np.sqrt( 0.5*bQinvb - c),  # [ \sqrt{ 1/2*b'*Q^{-1}*b -c } ]
+                    0.5*np.dot(Ainv.T,b)])     # [        1/2*(A')^{-1}*b      ]
+
+    z = np.dot(F,x) + g
+
+    # Add the constraint to the MathematicalProgram
+    return mp.AddLorentzConeConstraint(z)
+
 def AddForwardEulerDynamicsConstraint(mp, A, B, x, u, xnext, dt):
     """
     Add a dynamics constraint to the given Drake mathematical program mp, represinting
@@ -35,6 +80,33 @@ def S(a):
                     [-a[1], a[0], 0.0  ]])
 
     return S
+
+def regularize_linear_constraint(A,b):
+    """
+    Given a linear constraint of the form Ax <= b, return a new linear 
+    constraint A'x <= b' which removes all of the redundant constraints.
+    """
+
+    assert type(A) == np.ndarray, "A must be a numpy array"
+    assert type(b) == np.ndarray, "b must be a numpy array"
+    assert A.shape[0] == b.shape[0], "Invalid constraint dimensions %s and %s" % (A.shape, b.shape)
+
+    n = A.shape[1]   # size of x
+    
+    # Convert to cdd H-representation
+    H_np = np.hstack([A,b])
+    H = cdd.Matrix(H_np, number_type='float')
+    H.rep_type = cdd.RepType.INEQUALITY
+
+    # Remove redundancies
+    H.canonicalize()
+
+    # Convert back to original numpy 
+    H_np = np.asarray(H)
+    A_new = H_np[:,0:n]
+    b_new = H_np[:,n][np.newaxis].T
+
+    return A_new, b_new
 
 def face_to_span(A):
     """
