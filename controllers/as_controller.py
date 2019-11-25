@@ -243,6 +243,9 @@ class ValkyrieASController(ValkyrieQPController):
 
             b_cwc[start_idx:end_idx,:] = b_cwc_i
 
+        # Remove redundant rows
+        #A_cwc, b_cwc = regularize_linear_constraint(A_cwc,b_cwc)  # Warning: this leads to a significant slowdown!
+
         return A_cwc, b_cwc
 
     def ComputeAccelerationBoundConstraint(self):
@@ -273,8 +276,8 @@ class ValkyrieASController(ValkyrieQPController):
         in the template model while respecting contact constraints for the full model.
         """
         # Prediction horizon and sampling time
-        N = 5
-        dt = 0.4
+        N = 31
+        dt = 0.2
             
         # MPC Parameters
         R_mpc = 10*np.eye(2)      # ZMP tracking penalty
@@ -307,17 +310,45 @@ class ValkyrieASController(ValkyrieQPController):
                                                   dt)
 
             # Add dynamic constraints for the task space
-            task_dynamics_cons = AddForwardEulerDynamicsConstraint(mp, self.A_task, self.B_task, 
+            AddForwardEulerDynamicsConstraint(mp, self.A_task, self.B_task, 
                                                   x_task[:,i], u_task[:,i], x_task[:,i+1],
                                                   dt)
 
-            # Add interface constraint
-            A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
-            x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
-            interface_con = mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
+            # Add relaxed interface constraint
+            #xPx_now = (x_task[:,i] - np.dot(self.P,x_lip[:,i]))[np.newaxis].T
+            #V_now = np.dot(np.dot(xPx_now.T,self.M),xPx_now)  # (x_task - P*x_lip)'*M*(x_task-P*x_lip)
+
+            #xPx_next = (x_task[:,i+1] - np.dot(self.P,x_lip[:,i+1]))[np.newaxis].T
+            #V_next = np.dot(np.dot(xPx_next.T,self.M),xPx_next)  # (x_task - P*x_lip)'*M*(x_task-P*x_lip)
+
+            #mp.AddConstraint((V_next[0,0]-V_now[0,0])/dt <= -lmbda*V_now[0,0])
+            #mp.AddConstraint(V_now[0,0] <= 5)
+
+            # Reformulate constraint V(x_task, x_lip) <= epsilon as a quadratic constraint
+            # xbar'*QQ*xbar + bb'*xbar + cc <= 0
+            epsilon = 10000
+            xbar = np.vstack([x_task[:,i][np.newaxis].T,x_lip[:,i][np.newaxis].T])
+
+            QQ = np.vstack( [ np.hstack([ self.M,                   -np.dot(self.M,self.P) ]),
+                              np.hstack([ -np.dot(self.P.T,self.M), np.dot(np.dot(self.P.T,self.M),self.P) ])
+                              ])
             
-            interface_con.evaluator().UpdateUpperBound(1*np.ones(6))
-            interface_con.evaluator().UpdateLowerBound(-1*np.ones(6))
+            bb = np.zeros(xbar.shape)
+            cc = -epsilon^2
+
+
+            ## Slight diagonal inflation? This seems hacky, but the few non-positive eigenvalues are very
+            ## close to zero
+            QQ = QQ + 1e-9*np.eye(13)
+            AddQuadraticConstraint(mp,QQ,bb,cc,xbar)
+
+            # Add interface constraint
+            #A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
+            #x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
+            #interface_con = mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
+            #
+            #interface_con.evaluator().UpdateUpperBound(1*np.ones(6))
+            #interface_con.evaluator().UpdateLowerBound(-1*np.ones(6))
             
         for i in range(2,N-1):
             # Get linearized contact constraints
@@ -330,7 +361,7 @@ class ValkyrieASController(ValkyrieQPController):
             ub_cwc = b_cwc                        
             mp.AddLinearConstraint(A_cwc, lb_cwc, ub_cwc, xbar_cwc)
 
-            # Add acceleration bound constraint
+            ## Add acceleration bound constraint
             lb_bnd = -np.inf*np.ones(b_bnd.shape)
             ub_bnd = b_bnd
             mp.AddLinearConstraint(A_bnd, lb_bnd, ub_bnd, u_task[:,i])
@@ -339,7 +370,8 @@ class ValkyrieASController(ValkyrieQPController):
         mp.AddQuadraticErrorCost(Qf_mpc,np.zeros((2,1)),x_lip[2:4,N-1])
 
         # Solve the QP
-        solver = OsqpSolver()
+        #solver = OsqpSolver()
+        solver = GurobiSolver()
         #solver = IpoptSolver()
         res = solver.Solve(mp,None,None)
 
@@ -373,7 +405,7 @@ class ValkyrieASController(ValkyrieQPController):
 
         w1 = 1.0    # centroid momentum weight
         w2 = 10.0    # joint tracking weight
-        w3 = 100.0   # foot tracking weight
+        w3 = 200.0   # foot tracking weight
         w4 = 100.0   # torso orientation weight
 
         nu_min = -1e-10   # slack for contact constraint
