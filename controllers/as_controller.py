@@ -164,7 +164,7 @@ class ValkyrieASController(ValkyrieQPController):
         # Get foot (contact) positions in the world frame
         rf_pos, rf_vel = self.fsm.RightFootTrajectory(t)
         lf_pos, lf_vel = self.fsm.LeftFootTrajectory(t)
-        
+
         # Centroidal wrench w_GI = G_stance*w_all, where w_all = [w_surf_1, w_surf_2, ...]'
         # G_stance = [ R, S(p)*R ]
         #            [ 0,   R    ]
@@ -276,7 +276,7 @@ class ValkyrieASController(ValkyrieQPController):
         in the template model while respecting contact constraints for the full model.
         """
         # Prediction horizon and sampling time
-        N = 31
+        N = 20
         dt = 0.2
             
         # MPC Parameters
@@ -314,57 +314,45 @@ class ValkyrieASController(ValkyrieQPController):
                                                   x_task[:,i], u_task[:,i], x_task[:,i+1],
                                                   dt)
 
-            # Add relaxed interface constraint
-            #xPx_now = (x_task[:,i] - np.dot(self.P,x_lip[:,i]))[np.newaxis].T
-            #V_now = np.dot(np.dot(xPx_now.T,self.M),xPx_now)  # (x_task - P*x_lip)'*M*(x_task-P*x_lip)
-
-            #xPx_next = (x_task[:,i+1] - np.dot(self.P,x_lip[:,i+1]))[np.newaxis].T
-            #V_next = np.dot(np.dot(xPx_next.T,self.M),xPx_next)  # (x_task - P*x_lip)'*M*(x_task-P*x_lip)
-
-            #mp.AddConstraint((V_next[0,0]-V_now[0,0])/dt <= -lmbda*V_now[0,0])
-            #mp.AddConstraint(V_now[0,0] <= 5)
-
-            # Reformulate constraint V(x_task, x_lip) <= epsilon as a quadratic constraint
-            # xbar'*QQ*xbar + bb'*xbar + cc <= 0
-            epsilon = 10000
-            xbar = np.vstack([x_task[:,i][np.newaxis].T,x_lip[:,i][np.newaxis].T])
-
-            QQ = np.vstack( [ np.hstack([ self.M,                   -np.dot(self.M,self.P) ]),
-                              np.hstack([ -np.dot(self.P.T,self.M), np.dot(np.dot(self.P.T,self.M),self.P) ])
-                              ])
-            
-            bb = np.zeros(xbar.shape)
-            cc = -epsilon^2
-
-
-            ## Slight diagonal inflation? This seems hacky, but the few non-positive eigenvalues are very
-            ## close to zero
-            QQ = QQ + 1e-9*np.eye(13)
-            AddQuadraticConstraint(mp,QQ,bb,cc,xbar)
-
-            # Add interface constraint
+	    ## Add (exact) interface constraint
             #A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
             #x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
             #interface_con = mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
-            #
-            #interface_con.evaluator().UpdateUpperBound(1*np.ones(6))
-            #interface_con.evaluator().UpdateLowerBound(-1*np.ones(6))
-            
-        for i in range(2,N-1):
-            # Get linearized contact constraints
-            A_cwc, b_cwc = self.ComputeLinearizedContactConstraint(t+i*dt)
-            A_bnd, b_bnd = self.ComputeAccelerationBoundConstraint()
 
-	    # Add contact wrench cone constraint
-            xbar_cwc = np.hstack([x_task[:,i],u_task[:,i]])[np.newaxis].T  # [x_task;u_task]
-            lb_cwc = -np.inf*np.ones(b_cwc.shape) 
-            ub_cwc = b_cwc                        
-            mp.AddLinearConstraint(A_cwc, lb_cwc, ub_cwc, xbar_cwc)
+            if i >= 1:
+                # Add (approximate) interface constraint
+                
+                # Reformulate constraint V(x_task, x_lip) <= epsilon as a quadratic constraint
+                # xbar'*QQ*xbar + bb'*xbar + cc <= 0
+                epsilon = 5000
+                xbar = np.vstack([x_task[:,i][np.newaxis].T,x_lip[:,i][np.newaxis].T])
 
-            ## Add acceleration bound constraint
-            lb_bnd = -np.inf*np.ones(b_bnd.shape)
-            ub_bnd = b_bnd
-            mp.AddLinearConstraint(A_bnd, lb_bnd, ub_bnd, u_task[:,i])
+                QQ = np.vstack( [ np.hstack([ self.M,                   -np.dot(self.M,self.P) ]),
+                                  np.hstack([ -np.dot(self.P.T,self.M), np.dot(np.dot(self.P.T,self.M),self.P) ])
+                                  ])
+                
+                bb = np.zeros(xbar.shape)
+                cc = -epsilon^2
+
+                # Slight diagonal inflation? This seems hacky, but the few non-positive eigenvalues are very
+                # close to zero
+                QQ = QQ + 1e-9*np.eye(13)
+                AddQuadraticConstraint(mp,QQ,bb,cc,xbar)
+
+                # Get linearized contact constraints
+                A_cwc, b_cwc = self.ComputeLinearizedContactConstraint(t+i*dt)
+                A_bnd, b_bnd = self.ComputeAccelerationBoundConstraint()
+
+                # Add contact wrench cone constraint
+                xbar_cwc = np.hstack([x_task[:,i],u_task[:,i]])[np.newaxis].T  # [x_task;u_task]
+                lb_cwc = -np.inf*np.ones(b_cwc.shape) 
+                ub_cwc = b_cwc                        
+                mp.AddLinearConstraint(A_cwc, lb_cwc, ub_cwc, xbar_cwc)
+
+                ## Add acceleration bound constraint
+                lb_bnd = -np.inf*np.ones(b_bnd.shape)
+                ub_bnd = b_bnd
+                mp.AddLinearConstraint(A_bnd, lb_bnd, ub_bnd, u_task[:,i])
 
         # Add terminal cost
         mp.AddQuadraticErrorCost(Qf_mpc,np.zeros((2,1)),x_lip[2:4,N-1])

@@ -66,6 +66,7 @@ p_com_lip = np.zeros((n_steps,2))
 p_com_task = np.zeros((n_steps,2))
 output_err = np.zeros(n_steps)
 sim_fcn = np.zeros(n_steps)
+x_task_traj = np.zeros((n_steps,9))
 
 # Simulate forward
 for i in range(n_steps):
@@ -81,15 +82,22 @@ for i in range(n_steps):
     p_zmp_lip[i,:] = u_lip.flatten()
     p_com_lip[i,:] = x_lip[0:2].flatten()
     p_com_task[i,:] = x_task[0:2].flatten()
+    x_task_traj[i,:] = x_task.flatten()
 
     output_err[i] = np.linalg.norm( np.dot(c.C_lip,x_lip)-np.dot(c.C_task,x_task) )
    
     x_Px = x_task - np.dot(c.P,x_lip)
     sim_fcn[i] = np.sqrt( np.dot( np.dot(x_Px.T,c.M), x_Px) )
 
+    # Test CWC criterion
+    A_cwc, b_cwc = c.ComputeLinearizedContactConstraint(t)
+    xbar_cwc = np.vstack([x_task,u_task])
+    print(np.all(np.dot(A_cwc,xbar_cwc) <= b_cwc))
+
     # Simulate systems forward in time with Forward Euler
     x_lip = x_lip + dt*(np.dot(c.A_lip,x_lip) + np.dot(c.B_lip,u_lip))
     x_task = x_task + dt*(np.dot(c.A_task,x_task) + np.dot(c.B_task,u_task))
+
 
 ## MPC Recursive solves version
 #sim_time = 5
@@ -165,6 +173,10 @@ plt.plot(np.arange(0,sim_time,dt),sim_fcn, label="Simulation Function")
 plt.xlabel("Time")
 
 plt.legend()
-
+#
+## Plot of task-space trajectory
+#plt.figure()
+#plt.plot(x_task_traj)
+#plt.legend(["px", "py", "pz", "kx", "ky", "kz", "lx", "ly", "lz"])
 
 plt.show()

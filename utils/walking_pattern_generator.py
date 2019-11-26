@@ -16,10 +16,9 @@ class StandingFSM(object):
     A finite state machine describing simply standing in double support at the given position.
     """
     def __init__(self):
-        self.x_com_init = np.asarray([[0.0074], [0.0], [0.967]])
-
-        self.x_right_init = np.asarray([[-0.071], [-0.138], [0.099]])
-        self.x_left_init = np.asarray([[-0.071], [0.138], [0.099]])
+        self.x_com_init = np.asarray([[0.0], [0.0], [0.967]])
+        self.x_right_init = np.asarray([[-0.065], [-0.138], [0.1]])
+        self.x_left_init = np.asarray([[-0.065], [0.138], [0.1]])
 
         # define ZMP trajectory
         self.zmp_trajectory = type('', (), {})()  # define a new class in one line so we can imitate
@@ -78,14 +77,18 @@ class WalkingFSM(object):
         self.total_time = self.step_time*self.n_phases  
 
         # initial CoM and foot positions
-        self.x_com_init = np.asarray([[0.0074], [0.0], [0.967]])
+        self.x_com_init = np.asarray([[0.0], [0.0], [0.967]])
         self.xd_com_init = np.asarray([[0.0], [0.0], [0.0]])
 
-        self.x_right_init = np.asarray([[-0.071], [-0.138], [0.099]])
-        self.x_left_init = np.asarray([[-0.071], [0.138], [0.099]])
+        self.fc_offset = -0.065   # The foot frame is this far from the foot's center
 
-        self.foot_width = 0.16  # for visualization purposes only
-        self.foot_length = 0.27
+        self.x_right_init = np.asarray([[self.fc_offset], [-0.138], [0.1]])
+        self.x_left_init = np.asarray([[self.fc_offset], [0.138], [0.1]])
+
+        self.foot_w1 = 0.08  # width left of foot frame
+        self.foot_w2 = 0.08  # width right of foot frame
+        self.foot_l1 = 0.2   # length in front of foot
+        self.foot_l2 = 0.07  # length behind foot
 
         # LIP parameters
         self.h = self.x_com_init[2]  
@@ -128,14 +131,14 @@ class WalkingFSM(object):
         at the specified position.
         """
         from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-        x = [x_foot[0,0] + self.foot_length/2,
-             x_foot[0,0] + self.foot_length/2,
-             x_foot[0,0] - self.foot_length/2,
-             x_foot[0,0] - self.foot_length/2]
-        y = [x_foot[1,0] + self.foot_width/2,
-             x_foot[1,0] - self.foot_width/2,
-             x_foot[1,0] - self.foot_width/2,
-             x_foot[1,0] + self.foot_width/2]
+        x = [x_foot[0,0] + self.foot_l1,
+             x_foot[0,0] + self.foot_l1,
+             x_foot[0,0] - self.foot_l2,
+             x_foot[0,0] - self.foot_l2]
+        y = [x_foot[1,0] + self.foot_w1,
+             x_foot[1,0] - self.foot_w2,
+             x_foot[1,0] - self.foot_w2,
+             x_foot[1,0] + self.foot_w1]
         z = [x_foot[2,0] for i in range(4)]
 
         verts = [list(zip(x, y, z))]
@@ -197,26 +200,30 @@ class WalkingFSM(object):
         # Specify break points for piecwise linear interpolation
         break_times = np.asarray([[i*self.step_time] for i in range(self.n_phases+1)])
 
-        initial_x = np.mean([self.right_foot_placements[0][0], self.left_foot_placements[0][0]])
+        # Initial x position accounts for fc_offset, the difference between center of foot and origin of
+        # foot frame in the Valkyrie model.
+        initial_x = np.mean([self.right_foot_placements[0][0], self.left_foot_placements[0][0]]) - self.fc_offset
         initial_y = np.mean([self.right_foot_placements[0][1], self.left_foot_placements[0][1]])
 
         # specify the desired ZMP at the break times
         zmp_ref = np.asarray([[initial_x, initial_y]])
 
         # Shift ZMP to under the left foot initially
-        zmp_ref = np.vstack([zmp_ref,self.left_foot_placements[0][0:2,0]])
-        zmp_ref = np.vstack([zmp_ref,self.left_foot_placements[0][0:2,0]])
+        zmp_ref = np.vstack([zmp_ref,self.left_foot_placements[0][0:2,0] - [self.fc_offset, 0]])
+
+        # Wait under left foot
+        zmp_ref = np.vstack([zmp_ref,self.left_foot_placements[0][0:2,0] - [self.fc_offset, 0]])
 
         rf_idx = 1
         lf_idx = 1
         for i in range(self.n_steps-1):
             if i % 2 == 0:
                 # Right foot moved: shift ZMP under the right foot now
-                foot_center = self.right_foot_placements[rf_idx]
+                foot_center = self.right_foot_placements[rf_idx] - np.asarray([[self.fc_offset, 0, 0]]).T
                 rf_idx += 1
             else:
                 # Left foot moved: shift ZMP under the left foot now
-                foot_center = self.left_foot_placements[lf_idx]
+                foot_center = self.left_foot_placements[lf_idx] - np.asarray([[self.fc_offset, 0, 0]]).T
                 lf_idx += 1
 
             zmp_ref = np.vstack([zmp_ref,foot_center[0:2,0]])
@@ -228,7 +235,6 @@ class WalkingFSM(object):
 
         # ZMP reference knot points must be formatted such that each column is a knot point
         zmp_ref = zmp_ref.T
-
 
         self.zmp_trajectory = PiecewisePolynomial.FirstOrderHold(break_times,zmp_ref)
 

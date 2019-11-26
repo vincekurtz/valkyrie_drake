@@ -166,25 +166,16 @@ def perform_template_mpc(t, x_lip_init, x_task_init):
                                           dt)
 
         # Simulation function
-        x_lip_i = x_lip[:,i][np.newaxis].T    # keep as (nx1) numpy arrays
-        u_lip_i = u_lip[:,i][np.newaxis].T
-        x_task_i = x_task[:,i][np.newaxis].T
-        u_task_i = u_task[:,i][np.newaxis].T
+        xPx_now = (x_task[:,i] - np.dot(P,x_lip[:,i]))[np.newaxis].T
+        V_now = np.dot(np.dot(xPx_now.T,M),xPx_now)  # (x_task - P*x_lip)'*M*(x_task-P*x_lip)
 
-        xPx = x_task_i - np.dot(P,x_lip_i)
-        V = np.dot(np.dot(xPx.T,M),xPx)  # (x_task - P*x_lip)'*M*(x_task-P*x_lip)
-
-        # Time derivative of simulation function
-        dV_dxtask = Jacobian(V,x_task_i)
-        dV_dxlip = Jacobian(V,x_lip_i)
-
-        xlip_dot = np.dot(A_lip,x_lip_i) + np.dot(B_lip,u_lip_i)
-        xtask_dot = np.dot(A_task,x_task_i) + np.dot(B_task,u_task_i)
-
-        Vdot = np.dot(dV_dxlip,xlip_dot) + np.dot(dV_dxtask,xtask_dot)
+        
+        xPx_next = (x_task[:,i+1] - np.dot(P,x_lip[:,i+1]))[np.newaxis].T
+        V_next = np.dot(np.dot(xPx_next.T,M),xPx_next)  # (x_task - P*x_lip)'*M*(x_task-P*x_lip)
 
         # Add relaxed interface constraint
-        mp.AddConstraint(Vdot[0,0] <= -lmbda*V[0,0])
+        #mp.AddConstraint((V_next[0,0]-V_now[0,0])/dt <= -lmbda*V_now[0,0])
+        #mp.AddConstraint(V_now[0,0] <= 5)
 
         # Add interface constraint
         #A_interface = np.hstack([R, (Q-np.dot(K,P)), K, -np.eye(6)])
@@ -196,9 +187,13 @@ def perform_template_mpc(t, x_lip_init, x_task_init):
     mp.AddQuadraticErrorCost(Qf_mpc,np.zeros((2,1)),x_lip[2:4,N-1])  # Penalize CoM accelrations
         
     # Solve the QP
-    #solver = OsqpSolver()
-    #res = solver.Solve(mp,None,None)
-    res = Solve(mp)
+    st = time.time()
+    solver = OsqpSolver()
+    #solver = GurobiSolver()
+    res = solver.Solve(mp,None,None)
+
+    print("Solve time: %ss" % (time.time()-st))
+    #res = Solve(mp)
     print(res.get_solver_id().name())
 
     x_lip_traj = res.GetSolution(x_lip)
@@ -216,8 +211,6 @@ sim_time = step_time*zmp_ref.shape[1]
 sim_time = 10.0
 dt = 0.1
 n_steps = int(sim_time/dt)
-
-print(n_steps)
 
 # For storing results
 p_zmp_ref = np.zeros((n_steps,2))

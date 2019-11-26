@@ -31,12 +31,11 @@ class ValkyrieQPController(ValkyriePDController):
         (this is a rough guess based on self.tree.getTerrainContactPoints)
         """
         corner_contacts = (
-                            np.array([-0.069, 0.08, -0.099]),
-                            np.array([-0.069,-0.08, -0.099]),
-                            np.array([ 0.201,-0.08, -0.099]),
-                            np.array([ 0.201, 0.08, -0.099])
+                            np.array([-0.07, 0.08, -0.1]),
+                            np.array([-0.07,-0.08, -0.1]),
+                            np.array([ 0.20,-0.08, -0.1]),
+                            np.array([ 0.20, 0.08, -0.1])
                           )
-
         return corner_contacts
 
     def get_contact_jacobians(self, cache, support="double"):
@@ -268,9 +267,9 @@ class ValkyrieQPController(ValkyriePDController):
         x_com = self.tree.centerOfMass(cache)[np.newaxis].T
         xd_com = np.dot(J_com, qd)[np.newaxis].T
         x_com_nom, xd_com_nom, xdd_com_nom = self.fsm.ComTrajectory(context.get_time())
-      
-        xdd_com_des = xdd_com_nom + Kp_com*(x_com_nom-x_com) + Kd_com*(xd_com_nom-xd_com)
 
+        xdd_com_des = xdd_com_nom + Kp_com*(x_com_nom-x_com) + Kd_com*(xd_com_nom-xd_com)
+       
         # Compute desired centroid momentum dot
         h_com = np.dot(A, qd)[np.newaxis].T
         m = self.tree.massMatrix(cache)[0,0]  # total mass
