@@ -92,7 +92,14 @@ for i in range(n_steps):
     # Test CWC criterion
     A_cwc, b_cwc = c.ComputeLinearizedContactConstraint(t)
     xbar_cwc = np.vstack([x_task,u_task])
-    print(np.all(np.dot(A_cwc,xbar_cwc) <= b_cwc))
+    #print("CWC Constraint: %s" % np.all(np.dot(A_cwc,xbar_cwc) <= b_cwc))
+
+    # Test CoM acceleration constraint
+    A_bnd, b_bnd = c.ComputeAccelerationBoundConstraint()
+    print(c.lmax_x - abs(u_task[3,0]))
+    print(c.lmax_y - abs(u_task[4,0]))
+    print(c.lmax_z - abs(u_task[5,0]))
+    print("ldot Constraint: %s" % np.all(np.dot(A_bnd, u_task) <= b_bnd))
 
     # Simulate systems forward in time with Forward Euler
     x_lip = x_lip + dt*(np.dot(c.A_lip,x_lip) + np.dot(c.B_lip,u_lip))

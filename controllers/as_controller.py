@@ -31,7 +31,9 @@ class ValkyrieASController(ValkyrieQPController):
         self.m = m
         self.mu = 0.5
 
-        self.l_max = 0.58*m   # maximum linear momentum of the CoM for CWC linearization
+        self.lmax_x = 0.20*m   # maximum linear momentum of the CoM for CWC linearization
+        self.lmax_y = 0.20*m
+        self.lmax_z = 0.05*m
 
         # Wrench on the CoM due to gravity
         self.w_mg = np.array([0,0,0,0,0,-m*g])[np.newaxis].T
@@ -78,6 +80,7 @@ class ValkyrieASController(ValkyrieQPController):
 
         assert result.is_success(), "Interface SDP infeasible"
         self.M = result.GetSolution(M)
+        self.lmbda = lmbda
 
         self.P = self.C_lip
 
@@ -220,10 +223,11 @@ class ValkyrieASController(ValkyrieQPController):
         b_cwc = np.zeros((8*A.shape[0],1))
 
         # Iterate over corners of the cube constrainting CoM accelerations
-        unit_corners = list(itertools.product(*zip([-1,-1,-1],[1,1,1])))
+        unit_corners = list(itertools.product(*zip([-self.lmax_x,-self.lmax_x,-self.lmax_z],
+                                                   [ self.lmax_x, self.lmax_y, self.lmax_z])))
         for i in range(8):
             unit_corner = unit_corners[i]
-            l_dot = self.l_max*np.asarray(unit_corner)
+            l_dot = np.asarray(unit_corner)
 
             # Compute the constraint 
             #   A*u_com + A*[S(mg)-S(l_dot)]*p_com <= A*[0 ]
@@ -255,9 +259,11 @@ class ValkyrieASController(ValkyrieQPController):
             A_bnd*u_task <= b_bound
 
         which enforces that the CoM acceleration is bounded
-        by self.l_max in the sense that
+        in the sense that
 
-            \| m pdd_com \|_infty <= l_max
+            \| m pdd_x_com \|_infty <= l_max_x
+            \| m pdd_y_com \|_infty <= l_max_y
+            \| m pdd_z_com \|_infty <= l_max_z
         """
         A_bnd = np.array([[0,0,0, 1, 0, 0],
                           [0,0,0,-1, 0, 0],
@@ -266,7 +272,12 @@ class ValkyrieASController(ValkyrieQPController):
                           [0,0,0, 0, 0, 1],
                           [0,0,0, 0, 0,-1]])
 
-        b_bnd = self.l_max*np.ones((6,1))
+        b_bnd = np.array([[ self.lmax_x ],
+                          [ self.lmax_x ],
+                          [ self.lmax_y ],
+                          [ self.lmax_y ],
+                          [ self.lmax_z ],
+                          [ self.lmax_z ]])
 
         return A_bnd, b_bnd
 
@@ -314,30 +325,48 @@ class ValkyrieASController(ValkyrieQPController):
                                                   x_task[:,i], u_task[:,i], x_task[:,i+1],
                                                   dt)
 
-	    ## Add (exact) interface constraint
-            #A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
-            #x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
-            #interface_con = mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
+	    # Add (exact) interface constraint
+            A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
+            x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
+            interface_con = mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
 
             if i >= 1:
                 # Add (approximate) interface constraint
-                
-                # Reformulate constraint V(x_task, x_lip) <= epsilon as a quadratic constraint
-                # xbar'*QQ*xbar + bb'*xbar + cc <= 0
-                epsilon = 5000
-                xbar = np.vstack([x_task[:,i][np.newaxis].T,x_lip[:,i][np.newaxis].T])
+                # Vdot <= -lambda*V
+                #
+                # (V_t - V_{t-1})/dt <= -lambda*V_t   unfortunately, this seems to be non-convex (?)
 
-                QQ = np.vstack( [ np.hstack([ self.M,                   -np.dot(self.M,self.P) ]),
-                                  np.hstack([ -np.dot(self.P.T,self.M), np.dot(np.dot(self.P.T,self.M),self.P) ])
-                                  ])
+                #xbar = np.hstack([x_task[:,i], x_lip[:,i], x_task[:,i-1], x_lip[:,i-1]])[np.newaxis].T
+
+                #QQ = np.block([
+                #                [ self.M,                   -np.dot(self.M,self.P) ],
+                #                [ -np.dot(self.P.T,self.M), np.dot(np.dot(self.P.T,self.M),self.P) ]
+                #             ])
+
+                #Q = np.block([
+                #                [ (1/dt+self.lmbda)*QQ, np.zeros(QQ.shape) ],
+                #                [ np.zeros(QQ.shape),   -1/dt*QQ           ]
+                #            ])
+
+                #AddQuadraticConstraint(mp, Q, np.zeros(xbar.shape), 0, xbar)
+
                 
-                bb = np.zeros(xbar.shape)
-                cc = -epsilon^2
+                ## Reformulate constraint V(x_task, x_lip) <= epsilon as a quadratic constraint
+                ## xbar'*QQ*xbar + bb'*xbar + cc <= 0
+                #epsilon = 5000
+                #xbar = np.vstack([x_task[:,i][np.newaxis].T,x_lip[:,i][np.newaxis].T])
+
+                #QQ = np.vstack( [ np.hstack([ self.M,                   -np.dot(self.M,self.P) ]),
+                #                  np.hstack([ -np.dot(self.P.T,self.M), np.dot(np.dot(self.P.T,self.M),self.P) ])
+                #                  ])
+                #
+                #bb = np.zeros(xbar.shape)
+                #cc = -epsilon^2
 
                 # Slight diagonal inflation? This seems hacky, but the few non-positive eigenvalues are very
                 # close to zero
-                QQ = QQ + 1e-9*np.eye(13)
-                AddQuadraticConstraint(mp,QQ,bb,cc,xbar)
+                #QQ = QQ + 1e-9*np.eye(13)
+                #AddQuadraticConstraint(mp,QQ,bb,cc,xbar)
 
                 # Get linearized contact constraints
                 A_cwc, b_cwc = self.ComputeLinearizedContactConstraint(t+i*dt)
@@ -349,7 +378,7 @@ class ValkyrieASController(ValkyrieQPController):
                 ub_cwc = b_cwc                        
                 mp.AddLinearConstraint(A_cwc, lb_cwc, ub_cwc, xbar_cwc)
 
-                ## Add acceleration bound constraint
+                # Add acceleration bound constraint
                 lb_bnd = -np.inf*np.ones(b_bnd.shape)
                 ub_bnd = b_bnd
                 mp.AddLinearConstraint(A_bnd, lb_bnd, ub_bnd, u_task[:,i])
