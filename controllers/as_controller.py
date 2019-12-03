@@ -287,13 +287,19 @@ class ValkyrieASController(ValkyrieQPController):
         in the template model while respecting contact constraints for the full model.
         """
         # Prediction horizon and sampling time
-        N = 20
+        N = 40
         dt = 0.2
             
         # MPC Parameters
         R_mpc = 10*np.eye(2)      # ZMP tracking penalty
         Q_mpc = 1*np.eye(2)          # CoM velocity penalty
         Qf_mpc = 10*np.eye(2)      # Final CoM velocity penalty
+
+        # Simulation function can be defined as V = [x_task;x_lip]'Q_V[x_task;x_lip]
+        Q_V = np.block([
+                         [ self.M,                   -np.dot(self.M,self.P) ],
+                         [ -np.dot(self.P.T,self.M), np.dot(np.dot(self.P.T,self.M),self.P) ]
+                      ])
 
         # Set up a Drake MathematicalProgram
         mp = MathematicalProgram()
@@ -308,6 +314,10 @@ class ValkyrieASController(ValkyrieQPController):
         # Initial condition constraints
         init_task_constraint = mp.AddLinearEqualityConstraint(np.eye(9), x_task_init, x_task[:,0])
         init_lip_constraint  = mp.AddLinearEqualityConstraint(np.eye(4), x_lip_init, x_lip[:,0])
+
+        # Initial simulation function value. We'll use to enforce the simulation relation
+        xbar = np.vstack([x_task_init,x_lip_init])  # [x_task;x_lip]
+        V0 = np.dot( np.dot(xbar.T,Q_V),xbar )      # [x_task;x_lip]' * Q_V * [x_task;x_lip]
 
         for i in range(N-1):
             # Add Running Costs
@@ -326,47 +336,28 @@ class ValkyrieASController(ValkyrieQPController):
                                                   dt)
 
 	    # Add (exact) interface constraint
-            A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
-            x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
-            interface_con = mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
+            #A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
+            #x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
+            #interface_con = mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
 
             if i >= 1:
-                # Add (approximate) interface constraint
-                # Vdot <= -lambda*V
+                # Add the (approximate) interface constraint
                 #
-                # (V_t - V_{t-1})/dt <= -lambda*V_t   unfortunately, this seems to be non-convex (?)
+                #         Vdot < -lambda*V 
+                #     ==> V(t) <= V0 e^{-lambda(t-t0)
+                #              = nu(t)
+                nu = V0 * np.exp(-self.lmbda*(i*dt))
 
-                #xbar = np.hstack([x_task[:,i], x_lip[:,i], x_task[:,i-1], x_lip[:,i-1]])[np.newaxis].T
+                # We'll formulate as a quadratic constraint 
+                #     V(x_task, x_lip) <= nu(t)
+                #     xbar'*Q_V*xbar + b_V'*xbar + c_V <= 0
+                xbar = np.hstack([ x_task[:,i], x_lip[:,i] ])[np.newaxis].T
 
-                #QQ = np.block([
-                #                [ self.M,                   -np.dot(self.M,self.P) ],
-                #                [ -np.dot(self.P.T,self.M), np.dot(np.dot(self.P.T,self.M),self.P) ]
-                #             ])
+                Q_V += 1e-9*np.eye(13)       # Slight diagonal inflation for numerical stability
+                b_V = np.zeros(xbar.shape)
+                c_V = -nu
 
-                #Q = np.block([
-                #                [ (1/dt+self.lmbda)*QQ, np.zeros(QQ.shape) ],
-                #                [ np.zeros(QQ.shape),   -1/dt*QQ           ]
-                #            ])
-
-                #AddQuadraticConstraint(mp, Q, np.zeros(xbar.shape), 0, xbar)
-
-                
-                ## Reformulate constraint V(x_task, x_lip) <= epsilon as a quadratic constraint
-                ## xbar'*QQ*xbar + bb'*xbar + cc <= 0
-                #epsilon = 5000
-                #xbar = np.vstack([x_task[:,i][np.newaxis].T,x_lip[:,i][np.newaxis].T])
-
-                #QQ = np.vstack( [ np.hstack([ self.M,                   -np.dot(self.M,self.P) ]),
-                #                  np.hstack([ -np.dot(self.P.T,self.M), np.dot(np.dot(self.P.T,self.M),self.P) ])
-                #                  ])
-                #
-                #bb = np.zeros(xbar.shape)
-                #cc = -epsilon^2
-
-                # Slight diagonal inflation? This seems hacky, but the few non-positive eigenvalues are very
-                # close to zero
-                #QQ = QQ + 1e-9*np.eye(13)
-                #AddQuadraticConstraint(mp,QQ,bb,cc,xbar)
+                AddQuadraticConstraint(mp,Q_V,b_V,c_V,xbar)
 
                 # Get linearized contact constraints
                 A_cwc, b_cwc = self.ComputeLinearizedContactConstraint(t+i*dt)

@@ -68,6 +68,15 @@ output_err = np.zeros(n_steps)
 sim_fcn = np.zeros(n_steps)
 x_task_traj = np.zeros((n_steps,9))
 
+# Simulation function V = [x_task;x_lip]'*Q_V*[x_task;x_lip]
+Q_V = np.block([
+                [ c.M,                -np.dot(c.M,c.P) ],
+                [ -np.dot(c.P.T,c.M), np.dot(np.dot(c.P.T,c.M),c.P) ]
+              ])
+xbar = np.vstack([x_task,x_lip])
+
+V0 = np.dot(np.dot(xbar.T,Q_V),xbar)
+
 # Simulate forward
 for i in range(n_steps):
     t = i*dt
@@ -86,20 +95,8 @@ for i in range(n_steps):
 
     output_err[i] = np.linalg.norm( np.dot(c.C_lip,x_lip)-np.dot(c.C_task,x_task) )
    
-    x_Px = x_task - np.dot(c.P,x_lip)
-    sim_fcn[i] = np.sqrt( np.dot( np.dot(x_Px.T,c.M), x_Px) )
-
-    # Test CWC criterion
-    A_cwc, b_cwc = c.ComputeLinearizedContactConstraint(t)
-    xbar_cwc = np.vstack([x_task,u_task])
-    #print("CWC Constraint: %s" % np.all(np.dot(A_cwc,xbar_cwc) <= b_cwc))
-
-    # Test CoM acceleration constraint
-    A_bnd, b_bnd = c.ComputeAccelerationBoundConstraint()
-    print(c.lmax_x - abs(u_task[3,0]))
-    print(c.lmax_y - abs(u_task[4,0]))
-    print(c.lmax_z - abs(u_task[5,0]))
-    print("ldot Constraint: %s" % np.all(np.dot(A_bnd, u_task) <= b_bnd))
+    xbar = np.vstack([x_task,x_lip])
+    sim_fcn[i] = np.sqrt( np.dot(np.dot(xbar.T,Q_V),xbar) )
 
     # Simulate systems forward in time with Forward Euler
     x_lip = x_lip + dt*(np.dot(c.A_lip,x_lip) + np.dot(c.B_lip,u_lip))
@@ -108,7 +105,7 @@ for i in range(n_steps):
 
 ## MPC Recursive solves version
 #sim_time = 5
-#dt = 0.05
+#dt = 0.1
 #n_steps = int(sim_time/dt)
 #
 ## For storing results
