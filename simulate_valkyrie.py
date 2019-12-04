@@ -50,8 +50,8 @@ builder.Connect(
         scene_graph.get_source_pose_port(plant.get_source_id()))
 
 # Set up a controller
-#controller = builder.AddSystem(ValkyrieASController(tree,plant,dt))
-controller = builder.AddSystem(ValkyrieQPController(tree,plant))
+controller = builder.AddSystem(ValkyrieASController(tree,plant,dt))
+#controller = builder.AddSystem(ValkyrieQPController(tree,plant))
 builder.Connect(
         plant.get_state_output_port(),
         controller.get_input_port(0))

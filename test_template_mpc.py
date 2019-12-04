@@ -105,7 +105,7 @@ def test_CWC(A_cwc, b_cwc):
 
 # MPC Recursive solves version
 sim_time = 10
-dt = 0.05
+dt = 0.1
 n_steps = int(sim_time/dt)
 
 # For storing results

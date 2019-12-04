@@ -29,7 +29,7 @@ class ValkyrieASController(ValkyrieQPController):
         omega = np.sqrt(g/h)
         m = get_total_mass(tree)
         self.m = m
-        self.mu = 100.9
+        self.mu = 0.9
 
         self.lmax_x = 0.20*m   # maximum linear momentum of the CoM for CWC linearization
         self.lmax_y = 0.20*m
