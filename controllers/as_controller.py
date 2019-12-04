@@ -20,7 +20,7 @@ class ValkyrieASController(ValkyrieQPController):
         self.fsm = WalkingFSM(n_steps=4,
                               step_length=0.5,
                               step_height=0.05,
-                              step_time=1.0)
+                              step_time=0.9)
         #self.fsm = StandingFSM()
 
         # Parameters
@@ -29,11 +29,11 @@ class ValkyrieASController(ValkyrieQPController):
         omega = np.sqrt(g/h)
         m = get_total_mass(tree)
         self.m = m
-        self.mu = 0.5
+        self.mu = 0.7
 
         self.lmax_x = 0.20*m   # maximum linear momentum of the CoM for CWC linearization
         self.lmax_y = 0.20*m
-        self.lmax_z = 0.05*m
+        self.lmax_z = 0.01*m
 
         # Wrench on the CoM due to gravity
         self.w_mg = np.array([0,0,0,0,0,-m*g])[np.newaxis].T
@@ -287,8 +287,8 @@ class ValkyrieASController(ValkyrieQPController):
         in the template model while respecting contact constraints for the full model.
         """
         # Prediction horizon and sampling time
-        N = 40
-        dt = 0.2
+        N = 20
+        dt = 0.1
             
         # MPC Parameters
         R_mpc = 10*np.eye(2)      # ZMP tracking penalty
