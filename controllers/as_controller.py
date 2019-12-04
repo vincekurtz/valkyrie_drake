@@ -29,7 +29,7 @@ class ValkyrieASController(ValkyrieQPController):
         omega = np.sqrt(g/h)
         m = get_total_mass(tree)
         self.m = m
-        self.mu = 0.7
+        self.mu = 100.9
 
         self.lmax_x = 0.20*m   # maximum linear momentum of the CoM for CWC linearization
         self.lmax_y = 0.20*m
@@ -291,9 +291,9 @@ class ValkyrieASController(ValkyrieQPController):
         dt = 0.1
             
         # MPC Parameters
-        R_mpc = 10*np.eye(2)      # ZMP tracking penalty
+        R_mpc = 100*np.eye(2)      # ZMP tracking penalty
         Q_mpc = 1*np.eye(2)          # CoM velocity penalty
-        Qf_mpc = 10*np.eye(2)      # Final CoM velocity penalty
+        Qf_mpc = 1*np.eye(2)      # Final CoM velocity penalty
 
         # Simulation function can be defined as V = [x_task;x_lip]'Q_V[x_task;x_lip]
         Q_V = np.block([
@@ -336,9 +336,13 @@ class ValkyrieASController(ValkyrieQPController):
                                                   dt)
 
 	    # Add (exact) interface constraint
-            #A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
-            #x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
+            A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
+            x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
             #interface_con = mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
+
+            # Add cost to incentivize following the interface
+            Q_interface = 10.01*np.dot(A_interface.T,A_interface)
+            mp.AddQuadraticCost(Q_interface,np.zeros(x_interface.shape),x_interface)
 
             if i >= 1:
                 # Add the (approximate) interface constraint
@@ -357,7 +361,7 @@ class ValkyrieASController(ValkyrieQPController):
                 b_V = np.zeros(xbar.shape)
                 c_V = -nu
 
-                AddQuadraticConstraint(mp,Q_V,b_V,c_V,xbar)
+                #AddQuadraticConstraint(mp,Q_V,b_V,c_V,xbar)
 
                 # Get linearized contact constraints
                 A_cwc, b_cwc = self.ComputeLinearizedContactConstraint(t+i*dt)

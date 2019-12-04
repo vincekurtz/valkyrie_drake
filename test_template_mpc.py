@@ -104,8 +104,8 @@ def test_CWC(A_cwc, b_cwc):
 
 
 # MPC Recursive solves version
-sim_time = 5
-dt = 0.1
+sim_time = 10
+dt = 0.05
 n_steps = int(sim_time/dt)
 
 # For storing results
@@ -126,7 +126,11 @@ for i in range(n_steps):
     print(t)
 
     # Perform mpc
-    u_lip_traj, u_task_traj = c.DoTemplateMPC(t, x_lip, x_task)
+    try:
+        u_lip_traj, u_task_traj = c.DoTemplateMPC(t, x_lip, x_task)
+    except AssertionError:
+        print("Caught error")
+        break
 
     # Extract relevant values
     u_lip = u_lip_traj[:,0][np.newaxis].T
