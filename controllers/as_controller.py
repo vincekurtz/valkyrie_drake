@@ -341,7 +341,7 @@ class ValkyrieASController(ValkyrieQPController):
             #interface_con = mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
 
             # Add cost to incentivize following the interface
-            Q_interface = 10.01*np.dot(A_interface.T,A_interface)
+            Q_interface = 10.0*np.dot(A_interface.T,A_interface)
             mp.AddQuadraticCost(Q_interface,np.zeros(x_interface.shape),x_interface)
 
             if i >= 1:
@@ -451,10 +451,20 @@ class ValkyrieASController(ValkyrieQPController):
         J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index)  # foot jacobians
         J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index)
 
+        J_rpyleft = self.tree.relativeRollPitchYawJacobian(cache, self.world_index, self.left_foot_index, True)
+        Jd_qd_rpyleft = self.tree.relativeRollPitchYawJacobianDotTimesV(cache,
+                                                                        self.world_index,
+                                                                        self.left_foot_index)[np.newaxis].T
+        
+        J_rpyright = self.tree.relativeRollPitchYawJacobian(cache, self.world_index, self.right_foot_index, True)
+        Jd_qd_rpyright = self.tree.relativeRollPitchYawJacobianDotTimesV(cache,
+                                                                        self.world_index,
+                                                                        self.right_foot_index)[np.newaxis].T
+
         contact_jacobians, contact_jacobians_dot_v = self.get_contact_jacobians(cache, support)
         num_contacts = len(contact_jacobians)
 
-        J_torso = self.tree.relativeRollPitchYawJacobian(cache, self.world_index, self.torso_index,True)
+        J_torso = self.tree.relativeRollPitchYawJacobian(cache, self.world_index, self.torso_index, True)
         Jd_qd_torso = self.tree.relativeRollPitchYawJacobianDotTimesV(cache,
                                                                       self.world_index,
                                                                       self.torso_index)[np.newaxis].T
@@ -465,13 +475,31 @@ class ValkyrieASController(ValkyrieQPController):
         qdd_des = Kp_q*(q_nom-q) + Kd_q*(qd_nom-qd)
         qdd_des = qdd_des[np.newaxis].T
 
-        # Computed desired accelerations of the feet (at the corner points)
-        xdd_left_des, xdd_right_des = self.get_desired_foot_accelerations(cache, 
-                                                                          context.get_time(), 
-                                                                          qd, 
-                                                                          Kp_foot, Kd_foot)
+        # Compute desired linear accelerations of the feet
+        x_left = self.tree.transformPoints(cache, [0,0,0], self.left_foot_index, self.world_index)
+        xd_left = np.dot(J_left, qd)[np.newaxis].T
+        x_left_nom, xd_left_nom = self.fsm.LeftFootTrajectory(context.get_time())
+        xdd_left_des = Kp_foot*(x_left_nom - x_left) + Kd_foot*(xd_left_nom - xd_left)
+        
+        x_right = self.tree.transformPoints(cache, [0,0,0], self.right_foot_index, self.world_index)
+        xd_right = np.dot(J_right, qd)[np.newaxis].T
+        x_right_nom, xd_right_nom = self.fsm.RightFootTrajectory(context.get_time())
+        xdd_right_des = Kp_foot*(x_right_nom - x_right) + Kd_foot*(xd_right_nom - xd_right)
 
-        # Compute desired base frame angular acceleration
+        # Compute desired angular accelerations of the feet
+        rpy_left = self.tree.relativeRollPitchYaw(cache, self.world_index, self.left_foot_index)[np.newaxis].T
+        rpyd_left = np.dot(J_rpyleft,qd)[np.newaxis].T
+        rpy_left_nom = np.asarray([[0.0],[0.0],[0.0]])
+        rpyd_left_nom = np.zeros((3,1))
+        rpydd_left_des = Kp_foot*(rpy_left_nom - rpy_left) + Kd_foot*(rpyd_left_nom - rpyd_left)
+
+        rpy_right = self.tree.relativeRollPitchYaw(cache, self.world_index, self.right_foot_index)[np.newaxis].T
+        rpyd_right = np.dot(J_rpyright,qd)[np.newaxis].T
+        rpy_right_nom = np.asarray([[0.0],[0.0],[0.0]])
+        rpyd_right_nom = np.zeros((3,1))
+        rpydd_right_des = Kp_foot*(rpy_right_nom - rpy_right) + Kd_foot*(rpyd_right_nom - rpyd_right)
+
+        # Compute desired torso angular acceleration
         rpy_torso = self.tree.relativeRollPitchYaw(cache, self.world_index, self.torso_index)[np.newaxis].T
         rpyd_torso = np.dot(J_torso,qd)[np.newaxis].T
         rpy_torso_nom = np.asarray([[0.0],[-0.1],[0.0]])
@@ -496,16 +524,12 @@ class ValkyrieASController(ValkyrieQPController):
         # Joint tracking cost
         joint_cost = self.mp.AddQuadraticErrorCost(Q=w2*np.eye(self.nv),x_desired=qdd_des,vars=qdd)
 
-        # Foot tracking costs: add a cost for each corner of the foot
-        corners = self.get_foot_contact_points()
-        for i in range(len(corners)):
-            # Left foot tracking cost for this corner
-            J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index, relative_position=corners[i])
-            self.AddJacobianTypeCost(J_left, qdd, Jd_qd_left, xdd_left_des[i], weight=w3)
+        # Foot tracking costs: position and orientation for each foot
+        self.AddJacobianTypeCost(J_left, qdd, Jd_qd_left, xdd_left_des, weight=w3)
+        self.AddJacobianTypeCost(J_rpyleft, qdd, Jd_qd_rpyleft, rpydd_left_des, weight=w3)
 
-            # Right foot tracking cost
-            J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index, relative_position=corners[i])
-            self.AddJacobianTypeCost(J_right, qdd, Jd_qd_right, xdd_right_des[i], weight=w3)
+        self.AddJacobianTypeCost(J_right, qdd, Jd_qd_right, xdd_right_des, weight=w3)
+        self.AddJacobianTypeCost(J_rpyright, qdd, Jd_qd_rpyright, rpydd_right_des, weight=w3)
         
         # torso orientation cost
         torso_cost = self.AddJacobianTypeCost(J_torso, qdd, Jd_qd_torso, rpydd_torso_des, weight=w4)
