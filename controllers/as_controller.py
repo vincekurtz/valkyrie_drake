@@ -29,6 +29,7 @@ class ValkyrieASController(ValkyrieQPController):
         omega = np.sqrt(g/h)
         m = get_total_mass(tree)
         self.m = m
+        self.omega = omega
         self.mu = 0.9
 
         self.lmax_x = 0.20*m   # maximum linear momentum of the CoM for CWC linearization
@@ -291,15 +292,9 @@ class ValkyrieASController(ValkyrieQPController):
         dt = 0.1
             
         # MPC Parameters
-        R_mpc = 100*np.eye(2)      # ZMP tracking penalty
+        R_mpc = 10*np.eye(2)      # ZMP tracking penalty
         Q_mpc = 1*np.eye(2)          # CoM velocity penalty
         Qf_mpc = 1*np.eye(2)      # Final CoM velocity penalty
-
-        # Simulation function can be defined as V = [x_task;x_lip]'Q_V[x_task;x_lip]
-        Q_V = np.block([
-                         [ self.M,                   -np.dot(self.M,self.P) ],
-                         [ -np.dot(self.P.T,self.M), np.dot(np.dot(self.P.T,self.M),self.P) ]
-                      ])
 
         # Set up a Drake MathematicalProgram
         mp = MathematicalProgram()
@@ -314,10 +309,6 @@ class ValkyrieASController(ValkyrieQPController):
         # Initial condition constraints
         init_task_constraint = mp.AddLinearEqualityConstraint(np.eye(9), x_task_init, x_task[:,0])
         init_lip_constraint  = mp.AddLinearEqualityConstraint(np.eye(4), x_lip_init, x_lip[:,0])
-
-        # Initial simulation function value. We'll use to enforce the simulation relation
-        xbar = np.vstack([x_task_init,x_lip_init])  # [x_task;x_lip]
-        V0 = np.dot( np.dot(xbar.T,Q_V),xbar )      # [x_task;x_lip]' * Q_V * [x_task;x_lip]
 
         for i in range(N-1):
             # Add Running Costs
@@ -335,34 +326,14 @@ class ValkyrieASController(ValkyrieQPController):
                                                   x_task[:,i], u_task[:,i], x_task[:,i+1],
                                                   dt)
 
-	    # Add (exact) interface constraint
+            # Add cost to incentivize following the interface
             A_interface = np.hstack([self.R, (self.Q-np.dot(self.K,self.P)), self.K, -np.eye(6)])
             x_interface = np.hstack([u_lip[:,i],x_lip[:,i],x_task[:,i],u_task[:,i]])[np.newaxis].T
-            #interface_con = mp.AddLinearEqualityConstraint(A_interface, np.zeros((6,1)), x_interface)
 
-            # Add cost to incentivize following the interface
             Q_interface = 10.0*np.dot(A_interface.T,A_interface)
             mp.AddQuadraticCost(Q_interface,np.zeros(x_interface.shape),x_interface)
 
             if i >= 1:
-                # Add the (approximate) interface constraint
-                #
-                #         Vdot < -lambda*V 
-                #     ==> V(t) <= V0 e^{-lambda(t-t0)
-                #              = nu(t)
-                nu = V0 * np.exp(-self.lmbda*(i*dt))
-
-                # We'll formulate as a quadratic constraint 
-                #     V(x_task, x_lip) <= nu(t)
-                #     xbar'*Q_V*xbar + b_V'*xbar + c_V <= 0
-                xbar = np.hstack([ x_task[:,i], x_lip[:,i] ])[np.newaxis].T
-
-                Q_V += 1e-9*np.eye(13)       # Slight diagonal inflation for numerical stability
-                b_V = np.zeros(xbar.shape)
-                c_V = -nu
-
-                #AddQuadraticConstraint(mp,Q_V,b_V,c_V,xbar)
-
                 # Get linearized contact constraints
                 A_cwc, b_cwc = self.ComputeLinearizedContactConstraint(t+i*dt)
                 A_bnd, b_bnd = self.ComputeAccelerationBoundConstraint()
