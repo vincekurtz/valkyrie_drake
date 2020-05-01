@@ -17,99 +17,11 @@ class ValkyrieASController(ValkyrieQPController):
 
         # Finite state machine defining desired ZMP trajectory,
         # foot placements, and swing foot trajectories.
-        self.fsm = WalkingFSM(n_steps=4,
-                              step_length=0.5,
-                              step_height=0.05,
-                              step_time=0.9)
-        #self.fsm = StandingFSM()
-
-        # Parameters
-        h = 0.967
-        g = 9.81
-        omega = np.sqrt(g/h)
-        m = get_total_mass(tree)
-        self.m = m
-        self.omega = omega
-        self.mu = 0.9
-
-        self.lmax_x = 0.20*m   # maximum linear momentum of the CoM for CWC linearization
-        self.lmax_y = 0.20*m
-        self.lmax_z = 0.01*m
-
-        # Wrench on the CoM due to gravity
-        self.w_mg = np.array([0,0,0,0,0,-m*g])[np.newaxis].T
-
-        # Define template (LIPM) dynamics
-        self.A_lip = np.zeros((4,4))
-        self.A_lip[0:2,2:4] = np.eye(2)
-        self.A_lip[2:4,0:2] = omega**2*np.eye(2)
-
-        self.B_lip = np.zeros((4,2))
-        self.B_lip[2:4,:] = -omega**2*np.eye(2)
-
-        self.C_lip = np.zeros((9,4))
-        self.C_lip[0:2,0:2] = np.eye(2)
-        self.C_lip[6:8,2:4] = m*np.eye(2)
-
-        # Define anchor (centroidal) dynamics
-        self.A_task = np.zeros((9,9))
-        self.A_task[0:3,6:9] = 1/m*np.eye(3)
-
-        self.B_task = np.zeros((9,6))
-        self.B_task[3:9,:] = np.eye(6)
-
-        self.C_task = np.eye(9)
-
-        # Compute an interface that certifies an approximate simulation relation
-        # between the template and the anchor
-        interface_mp = MathematicalProgram()
-        
-        Q_task = 10*np.eye(9)
-        R_task = 1*np.eye(6)
-        K, P = LinearQuadraticRegulator(self.A_task, self.B_task, Q_task, R_task)
-        self.K = -K
-
-        lmbda = 0.001
-        M = interface_mp.NewSymmetricContinuousVariables(9,"M")
-
-        interface_mp.AddPositiveSemidefiniteConstraint(M - np.dot(self.C_task.T, self.C_task))
-
-        AplusBK = self.A_task + np.dot(self.B_task, self.K)
-        interface_mp.AddPositiveSemidefiniteConstraint(-2*lmbda*M - np.dot(AplusBK.T,M) - np.dot(M,AplusBK) )
-
-        result = Solve(interface_mp)
-
-        assert result.is_success(), "Interface SDP infeasible"
-        self.M = result.GetSolution(M)
-        self.lmbda = lmbda
-
-        self.P = self.C_lip
-
-        self.Q = np.zeros((6,4))
-        self.Q[3:5,0:2] = omega**2*m*np.eye(2)
-
-        self.R = np.zeros((6,2))
-        self.R[3:5] = -m*omega**2*np.eye(2)
-
-        # Double check the results
-        assert is_pos_def(self.M) , "M is not positive definite."
-        assert is_pos_def(-self.A_task-np.dot(self.B_task,self.K)) , "A+BK is not Hurwitz"
-
-        assert is_pos_def(self.M - np.dot(self.C_task.T,self.C_task)) , "Failed test M >= C'C"
-        assert is_pos_def(-2*lmbda*self.M \
-                          - np.dot((self.A_task+np.dot(self.B_task,self.K)).T,self.M) \
-                          - np.dot(self.M,self.A_task+np.dot(self.B_task,self.K)) ) , "Failed test (A+BK)'M+M(A+BK) <= -2lmbdaM"
-
-        assert np.all(self.C_lip == np.dot(self.C_task,self.P)) , "Failed test C_lip = C_task*P"
-
-        assert np.all( np.dot(self.P,self.A_lip) == np.dot(self.A_task,self.P) + np.dot(self.B_task,self.Q) ) \
-                    , "Failed Test P*A_lip = A_task*P+B*Q"
-
-        # Set initial LIPM state
-        self.x_lip = np.array([[0.0],   # x position
-                               [0.0],   # y position
-                               [0.0],   # x velocity
-                               [0.0]])  # y velocity
+        #self.fsm = WalkingFSM(n_steps=4,
+        #                      step_length=0.5,
+        #                      step_height=0.05,
+        #                      step_time=0.9)
+        self.fsm = StandingFSM()
 
     def GetTaskSpaceState(self, cache, q, qd):
         """
@@ -367,18 +279,20 @@ class ValkyrieASController(ValkyrieQPController):
 
         return u_lip_trajectory, u_task_trajectory
 
-    def SolveWholeBodyQP(self, cache, context, q, qd, u_task):
+    def SolveWholeBodyQP(self, cache, context, q, qd, x2, u2_nom):
         """
-        Formulates and solves a quadratic program which attempts to regulate the joints to the desired
-        accelerations and center of mass to the desired position as follows:
+        Formulates and solves a quadratic program which enforces an approximate
+        simulation-based interface uV(x1,x2,u2) while ensuring contact constraints
+        are met:
 
         minimize:
-            w1* || A*qdd + Ad*qd - u_task ||^2 +
+            w1* || u2 - u2_nom ||^2 +
             w2* || qdd_des - qdd ||^2 +
             w3* || J_foot*qdd + Jd_foot*qd - xdd_foot_des ||^2 +
             w4* || J_torso*qdd + Jd_torso*qd - rpydd_torso_des ||^2
         subject to:
-                H*qdd + C = B*tau + sum(J'*f)
+                M*qdd + Cv + tau_g = S'*tau + sum(J'*f)
+                S'*tau + sum(J'*f) = uV(x1,x2,u2) + N'*tau_0
                 f \in friction cones
                 J_cj*qdd + J'_cj*qd == nu
                 nu_min <= nu <= nu_max
@@ -386,10 +300,13 @@ class ValkyrieASController(ValkyrieQPController):
 
         ############## Tuneable Paramters ################
 
-        w1 = 1.0    # centroid momentum weight
+        w1 = 1.0     # abstract model input weight
         w2 = 10.0    # joint tracking weight
         w3 = 200.0   # foot tracking weight
         w4 = 100.0   # torso orientation weight
+
+        kappa = 100      # Interface PD gains
+        Kd_int = 5
 
         nu_min = -1e-10   # slack for contact constraint
         nu_max = 1e-10
@@ -412,14 +329,18 @@ class ValkyrieASController(ValkyrieQPController):
 
         # Compute dynamic quantities. Note that we cast vectors as nx1 numpy arrays to allow
         # for matrix multiplication with np.dot().
-        H = self.tree.massMatrix(cache)                  # Equations of motion
-        C = self.tree.dynamicsBiasTerm(cache, {}, True)[np.newaxis].T
-        B = self.tree.B
+        M = self.tree.massMatrix(cache)
+        tau_g = self.tree.dynamicsBiasTerm(cache,{},False).reshape(self.np,1)
+        Cv = self.tree.dynamicsBiasTerm(cache,{},True).reshape(self.np,1) - tau_g
+        S = self.tree.B.T
 
-        A = self.tree.centroidalMomentumMatrix(cache)              # Centroidal "jacobians"
-        Ad_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
-
-        J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index)  # foot jacobians
+        # Center of mass jacobian
+        J_com = self.tree.centerOfMassJacobian(cache)
+        Jd_qd_com = self.tree.centerOfMassJacobianDotTimesV(cache)
+       
+        
+        # Foot Jacobians
+        J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index)
         J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index)
 
         J_rpyleft = self.tree.relativeRollPitchYawJacobian(cache, self.world_index, self.left_foot_index, True)
@@ -432,9 +353,11 @@ class ValkyrieASController(ValkyrieQPController):
                                                                         self.world_index,
                                                                         self.right_foot_index)[np.newaxis].T
 
+        # Contact point jacobians
         contact_jacobians, contact_jacobians_dot_v = self.get_contact_jacobians(cache, support)
         num_contacts = len(contact_jacobians)
 
+        # torso jacobian
         J_torso = self.tree.relativeRollPitchYawJacobian(cache, self.world_index, self.torso_index, True)
         Jd_qd_torso = self.tree.relativeRollPitchYawJacobianDotTimesV(cache,
                                                                       self.world_index,
@@ -478,7 +401,13 @@ class ValkyrieASController(ValkyrieQPController):
 
         rpydd_torso_des = Kp_torso*(rpy_torso_nom - rpy_torso) + Kd_torso*(rpyd_torso_nom - rpyd_torso)
 
+        # Compute energy shaping-based interface
+        # TODO: formulate as linear constraint on u2
+        x_task = self.tree.centerOfMass(cache)[np.newaxis].T
+        Jbar_com = np.dot( np.linalg.inv( np.dot(J_com.T,J_com) + 1e-8*np.eye(self.np)), J_com.T)
+        uV = tau_g - kappa*np.dot(J_com.T, x_task-x2) - Kd_int*(qd.reshape(self.nv,1) - np.dot(Jbar_com,u2_nom))
 
+        
         #################### QP Formulation ##################
 
         self.mp = MathematicalProgram()
@@ -489,8 +418,7 @@ class ValkyrieASController(ValkyrieQPController):
        
         f_contact = [self.mp.NewContinuousVariables(3,1,'f_%s'%i) for i in range(num_contacts)]
 
-        # Centroidal momentum cost
-        centroidal_cost = self.AddJacobianTypeCost(A, qdd, Ad_qd, u_task[:,0], weight=w1)
+        # TODO: add nominal u2 tracking cost
        
         # Joint tracking cost
         joint_cost = self.mp.AddQuadraticErrorCost(Q=w2*np.eye(self.nv),x_desired=qdd_des,vars=qdd)
@@ -519,7 +447,10 @@ class ValkyrieASController(ValkyrieQPController):
             contact_constraint.evaluator().UpdateLowerBound(nu_min*np.array([1.0,1.0,1.0]))
        
         # Dynamic constraints 
-        dynamics_constraint = self.AddDynamicsConstraint(H, qdd, C, B, tau, contact_jacobians, f_contact)
+        # TODO refactor for clarity
+        dynamics_constraint = self.AddDynamicsConstraint(M, qdd, Cv+tau_g, S.T, tau, contact_jacobians, f_contact)
+
+        # TODO add interface constraint S'*tau + sum(J'*f_ext) = uV + N'*tau_0
 
         # Friction cone (really pyramid) constraints 
         friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
@@ -540,19 +471,39 @@ class ValkyrieASController(ValkyrieQPController):
         # Compute kinimatics, which will allow us to calculate key quantities
         cache = self.tree.doKinematics(q,qd)
 
-        # Compute the current template and task-space states
-        x_lip =  self.x_lip
-        x_task = self.GetTaskSpaceState(cache, q, qd)
+        # Comput nominal input to abstract system (CoM velocity)
+        x2 = np.array([0,0,0.9]).reshape(3,1)
+        u2_nom = np.zeros((3,1))
 
-        # Generate a template trajectory that respects whole-body CWC constraints
-        u_lip_traj, u_task_traj = self.DoTemplateMPC(context.get_time(), x_lip, x_task)
-        u_lip = u_lip_traj[:,0][np.newaxis].T
-        u_task = u_task_traj[:,0][np.newaxis].T
+        tau = self.SolveWholeBodyQP(cache, context, q, qd, x2, u2_nom)
 
-        # Feedback linearize with a whole-body QP to get desired torques
-        tau = self.SolveWholeBodyQP(cache, context, q, qd, u_task)#, x_com_nom, xd_com_nom)
+        ## Compute dynamics quantities
+        ##
+        ##  M*qdd + Cv + tau_g = S'*tau + sum(J'*f_ext)
+        ##
+        #M = self.tree.massMatrix(cache)
+        #tau_g = self.tree.dynamicsBiasTerm(cache,{},False).reshape(self.np,1)
+        #Cv = self.tree.dynamicsBiasTerm(cache,{},True).reshape(self.np,1) - tau_g
+        #S = self.tree.B.T
+       
+        ## Compute task-space jacobian, etc
+        #x_task = self.tree.centerOfMass(cache)[np.newaxis].T
+        #J = self.tree.centerOfMassJacobian(cache)
+        #Jbar = np.dot( np.linalg.inv( np.dot(J.T,J) + 1e-8*np.eye(self.np)), J.T)
+        #Jd_qd = self.tree.centerOfMassJacobianDotTimesV(cache)
 
-        # Simulate the template forward in time (simple forward Euler)
-        self.x_lip += (np.dot(self.A_lip,self.x_lip) + np.dot(self.B_lip, u_lip))*self.dt
+        ## Abstract model state
+        #x2 = np.array([0,0,0.9]).reshape(3,1)   # desired CoM position
+        #u2 = np.zeros((3,1))
+
+        ## Energy shaping interface
+        #kappa = 500.0
+        #Kd = 5.0
+        #uV = tau_g - kappa*np.dot(J.T, x_task-x2) - Kd*(qd.reshape(self.nv,1) - np.dot(Jbar,u2))
+        #uV = uV.reshape(self.np)
+
+       
+        ## Map interface to joint torques
+        #tau = np.dot(S,uV)
 
         output[:] = tau
