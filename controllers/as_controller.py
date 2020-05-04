@@ -341,7 +341,13 @@ class ValkyrieASController(ValkyrieQPController):
         # Center of mass jacobian
         J_com = self.tree.centerOfMassJacobian(cache)
         Jd_qd_com = self.tree.centerOfMassJacobianDotTimesV(cache)
-      
+
+        # Nullspace projector 
+        Minv = np.linalg.inv(M)
+        Lambda = np.linalg.inv( np.dot(np.dot(J_com,Minv),J_com.T))
+        Jbar = np.dot( np.dot(Minv, J_com.T), Lambda)
+        N = (np.eye(self.np) - np.dot(J_com.T,Jbar.T)).T
+
         # Centroidal momentum matrix h = A*qd
         A = self.tree.centroidalMomentumMatrix(cache)
         Ad_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
@@ -417,7 +423,6 @@ class ValkyrieASController(ValkyrieQPController):
         hd_com_des = Kp_h*(h_com_nom - h_com)
 
         
-
         # Compute energy shaping-based interface
         # TODO: formulate as linear constraint on u2
         x_task = self.tree.centerOfMass(cache)[np.newaxis].T
@@ -432,6 +437,9 @@ class ValkyrieASController(ValkyrieQPController):
         # create optimization variables
         qdd = self.mp.NewContinuousVariables(self.nv, 1, 'qdd')   # joint accelerations
         tau = self.mp.NewContinuousVariables(self.nu, 1, 'tau')   # applied torques
+
+        u2 = self.mp.NewContinuousVariables(len(u2_nom), 1, 'u2') # input to abstract system
+        tau0 = self.mp.NewContinuousVariables(self.np, 1, 'tau0') # (fictional) torques in nullspace of CoM motion
        
         f_contact = [self.mp.NewContinuousVariables(3,1,'f_%s'%i) for i in range(num_contacts)]
 
@@ -470,7 +478,13 @@ class ValkyrieASController(ValkyrieQPController):
         # TODO refactor for clarity
         dynamics_constraint = self.AddDynamicsConstraint(M, qdd, Cv+tau_g, S.T, tau, contact_jacobians, f_contact)
 
-        # TODO add interface constraint S'*tau + sum(J'*f_ext) = uV + N'*tau_0
+        # Add interface constraint S'*tau + sum(J'*f_ext) = uV + N'*tau_0
+        # TODO: refactor to separate method
+        contact_jacobians_transpose = np.hstack([contact_jacobians[i].T for i in range(len(contact_jacobians))])
+        A_iface_eq = np.block([S.T, -N.T, contact_jacobians_transpose])
+        b_iface_eq = uV
+        vars_iface = np.vstack([tau, tau0] + f_contact)
+        self.mp.AddLinearEqualityConstraint(A_iface_eq, b_iface_eq, vars_iface)
 
         # Friction cone (really pyramid) constraints 
         friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
