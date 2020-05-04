@@ -307,8 +307,8 @@ class ValkyrieASController(ValkyrieQPController):
         w4 = 50.0   # torso orientation weight
         w5 = 0.1    # centroidal momentum weight
 
-        kappa = 100      # Interface PD gains
-        Kd_int = 5
+        kappa = 500      # Interface PD gains
+        Kd_int = 300
 
         nu_min = -1e-10   # slack for contact constraint
         nu_max = 1e-10
@@ -429,7 +429,6 @@ class ValkyrieASController(ValkyrieQPController):
         Jbar_com = np.dot( np.linalg.inv( np.dot(J_com.T,J_com) + 1e-8*np.eye(self.np)), J_com.T)
         uV = tau_g - kappa*np.dot(J_com.T, x_task-x2) - Kd_int*(qd.reshape(self.nv,1) - np.dot(Jbar_com,u2_nom))
 
-        
         #################### QP Formulation ##################
 
         self.mp = MathematicalProgram()
@@ -486,6 +485,9 @@ class ValkyrieASController(ValkyrieQPController):
         vars_iface = np.vstack([tau, tau0] + f_contact)
         self.mp.AddLinearEqualityConstraint(A_iface_eq, b_iface_eq, vars_iface)
 
+        #DEBUG
+        print(x_task)
+
         # Friction cone (really pyramid) constraints 
         friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
 
@@ -510,35 +512,5 @@ class ValkyrieASController(ValkyrieQPController):
         u2_nom = np.zeros((3,1))
 
         tau = self.SolveWholeBodyQP(cache, context, q, qd, x2, u2_nom)
-        #tau = self.SolveWholeBodyQPQP(cache, context, q, qd)
-
-        ## Compute dynamics quantities
-        ##
-        ##  M*qdd + Cv + tau_g = S'*tau + sum(J'*f_ext)
-        ##
-        #M = self.tree.massMatrix(cache)
-        #tau_g = self.tree.dynamicsBiasTerm(cache,{},False).reshape(self.np,1)
-        #Cv = self.tree.dynamicsBiasTerm(cache,{},True).reshape(self.np,1) - tau_g
-        #S = self.tree.B.T
-       
-        ## Compute task-space jacobian, etc
-        #x_task = self.tree.centerOfMass(cache)[np.newaxis].T
-        #J = self.tree.centerOfMassJacobian(cache)
-        #Jbar = np.dot( np.linalg.inv( np.dot(J.T,J) + 1e-8*np.eye(self.np)), J.T)
-        #Jd_qd = self.tree.centerOfMassJacobianDotTimesV(cache)
-
-        ## Abstract model state
-        #x2 = np.array([0,0,0.9]).reshape(3,1)   # desired CoM position
-        #u2 = np.zeros((3,1))
-
-        ## Energy shaping interface
-        #kappa = 500.0
-        #Kd = 5.0
-        #uV = tau_g - kappa*np.dot(J.T, x_task-x2) - Kd*(qd.reshape(self.nv,1) - np.dot(Jbar,u2))
-        #uV = uV.reshape(self.np)
-
-       
-        ## Map interface to joint torques
-        #tau = np.dot(S,uV)
 
         output[:] = tau
