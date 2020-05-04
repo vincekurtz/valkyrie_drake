@@ -23,6 +23,25 @@ class ValkyrieASController(ValkyrieQPController):
         #                      step_time=0.9)
         self.fsm = StandingFSM()
 
+        # Abstract Model Dynamics
+        #
+        #   x2_dot = A2*x2 + B2*u2
+        #
+        # where x2 is a desired CoM position and u2 is a desired
+        # CoM velocity.
+        self.A2 = np.zeros((3,3))
+        self.B2 = np.eye(3)
+
+        # Initial abstract system state
+        self.x2 = np.array([0.0,0.0,0.96]).reshape(3,1)
+
+        # Stuff to record for later plotting
+        self.t = []                 # timesteps
+        self.V = []                 # simulation function
+        self.err = []               # output error
+        self.y1 = np.empty((3,1))   # concrete system output: true CoM position
+        self.y2 = np.empty((3,1))   # abstract system output: desired CoM position
+
     def AddInterfaceConstraint(self, S, contact_jacobians, contact_forces, N, A_int, b_int, u2, tau, tau0):
         """
         Add the interface constraint
@@ -43,23 +62,27 @@ class ValkyrieASController(ValkyrieQPController):
 
         self.mp.AddLinearEqualityConstraint(A_iface_eq, b_iface_eq, vars_iface)
 
-    def SolveWholeBodyQP(self, cache, context, q, qd, x2, u2_nom):
+    def SolveWholeBodyQP(self, cache, context, q, qd, u2_nom):
         """
         Formulates and solves a quadratic program which enforces an approximate
         simulation-based interface uV(x1,x2,u2) while ensuring contact constraints
         are met:
 
-        minimize:
-            w1* || u2 - u2_nom ||^2 +
-            w2* || qdd_des - qdd ||^2 +
-            w3* || J_foot*qdd + Jd_foot*qd - xdd_foot_des ||^2 +
-            w4* || J_torso*qdd + Jd_torso*qd - rpydd_torso_des ||^2
-        subject to:
-                M*qdd + Cv + tau_g = S'*tau + sum(J'*f)
-                S'*tau + sum(J'*f) = uV(x1,x2,u2) + N'*tau_0
-                f \in friction cones
-                J_cj*qdd + J'_cj*qd == nu
-                nu_min <= nu <= nu_max
+            minimize:
+                w1* || u2 - u2_nom ||^2 +
+                w2* || qdd_des - qdd ||^2 +
+                w3* || J_foot*qdd + Jd_foot*qd - xdd_foot_des ||^2 +
+                w4* || J_torso*qdd + Jd_torso*qd - rpydd_torso_des ||^2
+            subject to:
+                    M*qdd + Cv + tau_g = S'*tau + sum(J'*f)
+                    S'*tau + sum(J'*f) = uV(x1,x2,u2) + N'*tau_0
+                    f \in friction cones
+                    J_cj*qdd + J'_cj*qd == nu
+                    nu_min <= nu <= nu_max
+
+        Returns:
+            tau - control torques to apply to the robot
+            u2 - control input for the abstract system
         """
         
 
@@ -188,7 +211,7 @@ class ValkyrieASController(ValkyrieQPController):
         x_task = self.tree.centerOfMass(cache)[np.newaxis].T
         Jbar_com = np.dot( np.linalg.inv( np.dot(J_com.T,J_com) + 1e-8*np.eye(self.np)), J_com.T)
         A_int = Kd_int*Jbar_com
-        b_int = tau_g - kappa*np.dot(J_com.T, x_task-x2) - Kd_int*qd.reshape(self.nv,1)
+        b_int = tau_g - kappa*np.dot(J_com.T, x_task-self.x2) - Kd_int*qd.reshape(self.nv,1)
 
         #################### QP Formulation ##################
 
@@ -249,7 +272,7 @@ class ValkyrieASController(ValkyrieQPController):
 
         assert result.is_success(), "Whole-body QP Failed"
 
-        return result.GetSolution(tau)
+        return (result.GetSolution(tau), result.GetSolution(u2))
 
     def DoCalcVectorOutput(self, context, state, unused, output):
         """
@@ -260,14 +283,33 @@ class ValkyrieASController(ValkyrieQPController):
         # Compute kinimatics, which will allow us to calculate key quantities
         cache = self.tree.doKinematics(q,qd)
 
-        # DEBUG
-        x_task = self.tree.centerOfMass(cache).reshape(3,1)
-        print(x_task)
-
         # Comput nominal input to abstract system (CoM velocity)
-        x2 = np.array([0.0,0.0,0.9]).reshape(3,1)
-        u2_nom = np.array([0.1, 0.0, 0.0]).reshape(3,1)
+        x2_nom  = np.array([0.0, 0.0, 0.9]).reshape(3,1)
+        u2_nom = -0.9*(self.x2 - x2_nom)
 
-        tau = self.SolveWholeBodyQP(cache, context, q, qd, x2, u2_nom)
+        tau, u2 = self.SolveWholeBodyQP(cache, context, q, qd, u2_nom)
 
+        # Set control torques to be sent to the robot
         output[:] = tau
+
+        # Simulate abstract system forward in time
+        x2_dot = np.dot(self.A2,self.x2) + np.dot(self.B2,u2.reshape(3,1))
+        self.x2 = self.x2 + x2_dot*self.dt
+
+        # Record stuff for later plotting
+        self.t.append(context.get_time())
+
+        y1 = self.tree.centerOfMass(cache).reshape(3,1)
+        y2 = self.x2
+        self.y1 = np.hstack([self.y1, y1])
+        self.y2 = np.hstack([self.y2, y2])
+
+        err = np.dot((y1-y2).T,(y1-y2))[0,0]
+        self.err.append(err)
+
+        M = self.tree.massMatrix(cache)
+        J = self.tree.centerOfMassJacobian(cache)
+        kappa = 500
+        V = 0.5*np.dot(np.dot(qd.T,M),qd) + 500*err
+        self.V.append(V)
+

@@ -4,6 +4,7 @@ from pydrake.all import *
 from utils.helpers import ValkyrieFixedPointState
 from controllers import ValkyriePDController, ValkyrieQPController, ValkyrieASController
 import numpy as np
+import matplotlib.pyplot as plt
 
 # Load the valkyrie model from a urdf file
 robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_A_sim_drake_one_neck_dof_wide_ankle_rom.urdf"
@@ -50,8 +51,8 @@ builder.Connect(
         scene_graph.get_source_pose_port(plant.get_source_id()))
 
 # Set up a controller
-controller = builder.AddSystem(ValkyrieASController(tree,plant,dt))
-#controller = builder.AddSystem(ValkyriePDController(tree,plant))
+ctrl = ValkyrieASController(tree,plant,dt)
+controller = builder.AddSystem(ctrl)
 #controller = builder.AddSystem(ValkyrieQPController(tree,plant))
 builder.Connect(
         plant.get_state_output_port(),
@@ -81,4 +82,48 @@ state.SetFromVector(initial_state_vec)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(10.0)
+simulator.AdvanceTo(5.0)
+
+####################################################################
+# Make some plots
+####################################################################
+
+# Plot of y1 vs y2
+plt.figure()
+plt.subplot(3,1,1)
+plt.plot(ctrl.t, ctrl.y1[0,1:], label="actual", linewidth='2')
+plt.plot(ctrl.t, ctrl.y2[0,1:], "--", label="desired", linewidth='2')
+plt.ylabel("x")
+#plt.ylim(-2,2)
+plt.legend()
+plt.title("CoM Position Tracking")
+
+plt.subplot(3,1,2)
+plt.plot(ctrl.t, ctrl.y1[1,1:], label="actual", linewidth='2')
+plt.plot(ctrl.t, ctrl.y2[1,1:], "--", label="desired", linewidth='2')
+plt.ylabel("y")
+#plt.ylim(-2,2)
+
+plt.subplot(3,1,3)
+plt.plot(ctrl.t, ctrl.y1[2,1:], label="actual", linewidth='2')
+plt.plot(ctrl.t, ctrl.y2[2,1:], "--", label="desired", linewidth='2')
+plt.ylabel("z")
+plt.xlabel("time")
+#plt.ylim(-2,2)
+
+
+# Plot of simulation function vs error
+plt.figure()
+plt.subplot(2,1,1)
+plt.plot(ctrl.t, ctrl.V, label="Simulation Function", linewidth='2')
+plt.ylabel("Simulation Function")
+plt.title("Simulation Fcn vs. Output Error")
+
+plt.subplot(2,1,2)
+plt.plot(ctrl.t, ctrl.err, label="Output Error", color='green', linewidth='2')
+plt.ylabel("Output Error")
+plt.xlabel("time")
+
+plt.show()
+
+
