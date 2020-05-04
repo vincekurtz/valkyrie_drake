@@ -86,7 +86,7 @@ class ValkyrieASController(ValkyrieQPController):
         Kp_torso = 500.0   # torso orientation PD gains
         Kd_torso = 50.0
 
-        Kp_h = 10.0    # Centroidal momentum P gain
+        Kp_k = 10.0    # angular momentum P gain
 
         Kd_contact = 10.0  # Contact movement damping P gain
 
@@ -112,9 +112,9 @@ class ValkyrieASController(ValkyrieQPController):
         Jbar = np.dot( np.dot(Minv, J_com.T), Lambda)
         N = (np.eye(self.np) - np.dot(J_com.T,Jbar.T)).T
 
-        # Centroidal momentum matrix h = A*qd
-        A = self.tree.centroidalMomentumMatrix(cache)
-        Ad_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
+        # CoM angular momentum jacobian
+        J_k = self.tree.centroidalMomentumMatrix(cache)[0:3,:]
+        Jd_qd_k = self.tree.centroidalMomentumMatrixDotTimesV(cache)[0:3]
         
         # Foot Jacobians
         J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index)
@@ -178,14 +178,10 @@ class ValkyrieASController(ValkyrieQPController):
 
         rpydd_torso_des = Kp_torso*(rpy_torso_nom - rpy_torso) + Kd_torso*(rpyd_torso_nom - rpyd_torso)
 
-        # Compute desired centroidal momentum dot
-        h_com = np.dot(A, qd)[np.newaxis].T
-        _, xd_com_nom, _ = self.fsm.ComTrajectory(context.get_time())  # TODO: use u2_nom? or just consider angular component?
-        
-        h_com_nom = np.vstack([np.zeros((3,1)),M[0,0]*xd_com_nom])  # desired angular velocity is zero,
-                                                                    # CoM velocity matches the CoM trajectory
-        hd_com_des = Kp_h*(h_com_nom - h_com)
-
+        # Compute desired CoM angular momentum dot
+        k_com = np.dot(J_k, qd)[np.newaxis].T
+        k_com_nom = np.zeros((3,1))
+        kd_com_des = Kp_k*(k_com_nom - k_com)
         
         # Compute energy shaping-based interface as a linear constraint 
         # uV = tau_g - kappa*J'*(x_task-x2) - Kd*(qd-Jbar*u2) = A_int*u2 + b_int
@@ -223,8 +219,8 @@ class ValkyrieASController(ValkyrieQPController):
         # torso orientation cost
         torso_cost = self.AddJacobianTypeCost(J_torso, qdd, Jd_qd_torso, rpydd_torso_des, weight=w4)
 
-        # centroidal momentum cost
-        centroidal_cost = self.AddJacobianTypeCost(A, qdd, Ad_qd, hd_com_des, weight=w5)
+        # angular momentum
+        angular_cost = self.AddJacobianTypeCost(J_k, qdd, Jd_qd_k, kd_com_des, weight=w5)
             
         # Contact acceleration constraint
         for j in range(num_contacts):
@@ -240,14 +236,10 @@ class ValkyrieASController(ValkyrieQPController):
             contact_constraint.evaluator().UpdateLowerBound(nu_min*np.array([1.0,1.0,1.0]))
        
         # Dynamic constraints 
-        # TODO refactor for clarity
         dynamics_constraint = self.AddDynamicsConstraint(M, qdd, Cv+tau_g, S.T, tau, contact_jacobians, f_contact)
 
         # Add interface constraint S'*tau + sum(J'*f_ext) = uV + N'*tau_0
         self.AddInterfaceConstraint(S, contact_jacobians, f_contact, N, A_int, b_int, u2, tau, tau0)
-
-        #DEBUG
-        print(x_task)
 
         # Friction cone (really pyramid) constraints 
         friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
@@ -269,7 +261,7 @@ class ValkyrieASController(ValkyrieQPController):
         cache = self.tree.doKinematics(q,qd)
 
         # Comput nominal input to abstract system (CoM velocity)
-        x2 = np.array([0,0,0.9]).reshape(3,1)
+        x2 = np.array([0.0,0.0,0.9]).reshape(3,1)
         u2_nom = np.zeros((3,1))
 
         tau = self.SolveWholeBodyQP(cache, context, q, qd, x2, u2_nom)
