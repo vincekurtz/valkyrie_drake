@@ -23,19 +23,23 @@ class ValkyrieASController(ValkyrieQPController):
         #                      step_time=0.9)
         self.fsm = StandingFSM()
 
-    def AddInterfaceConstraint(self, S, contact_jacobians, contact_forces, N, uV, tau, tau0):
+    def AddInterfaceConstraint(self, S, contact_jacobians, contact_forces, N, A_int, b_int, u2, tau, tau0):
         """
         Add the interface constraint
 
             S'tau + sum(J_contact'f_contact) = uV(x1,x2,u2) + N'*tau0
 
+        where
+
+            uV(x1,x2,u2) = A_int*u2 + b_int
+
         to the whole-body QP as a linear constraint on tau, f_contact, u2, and tau0.
         """
         contact_jacobians_transpose = np.hstack([contact_jacobians[i].T for i in range(len(contact_jacobians))])
 
-        A_iface_eq = np.block([S.T, -N.T, contact_jacobians_transpose])
-        b_iface_eq = uV
-        vars_iface = np.vstack([tau, tau0] + contact_forces)
+        A_iface_eq = np.block([S.T, -N.T, -A_int, contact_jacobians_transpose])
+        b_iface_eq = b_int
+        vars_iface = np.vstack([tau, tau0, u2] + contact_forces)
 
         self.mp.AddLinearEqualityConstraint(A_iface_eq, b_iface_eq, vars_iface)
 
@@ -61,7 +65,7 @@ class ValkyrieASController(ValkyrieQPController):
 
         ############## Tuneable Paramters ################
 
-        w1 = 1.0    # abstract model input weight
+        w1 = 1e6    # abstract model input weight
         w2 = 0.5    # joint tracking weight
         w3 = 50.0   # foot tracking weight
         w4 = 50.0   # torso orientation weight
@@ -176,7 +180,7 @@ class ValkyrieASController(ValkyrieQPController):
 
         # Compute desired centroidal momentum dot
         h_com = np.dot(A, qd)[np.newaxis].T
-        _, xd_com_nom, _ = self.fsm.ComTrajectory(context.get_time())  # TODO: use u2_nom?
+        _, xd_com_nom, _ = self.fsm.ComTrajectory(context.get_time())  # TODO: use u2_nom? or just consider angular component?
         
         h_com_nom = np.vstack([np.zeros((3,1)),M[0,0]*xd_com_nom])  # desired angular velocity is zero,
                                                                     # CoM velocity matches the CoM trajectory
@@ -189,7 +193,6 @@ class ValkyrieASController(ValkyrieQPController):
         Jbar_com = np.dot( np.linalg.inv( np.dot(J_com.T,J_com) + 1e-8*np.eye(self.np)), J_com.T)
         A_int = Kd_int*Jbar_com
         b_int = tau_g - kappa*np.dot(J_com.T, x_task-x2) - Kd_int*qd.reshape(self.nv,1)
-        uV = np.dot(A_int, u2_nom) + b_int
 
         #################### QP Formulation ##################
 
@@ -204,7 +207,8 @@ class ValkyrieASController(ValkyrieQPController):
        
         f_contact = [self.mp.NewContinuousVariables(3,1,'f_%s'%i) for i in range(num_contacts)]
 
-        # TODO: add nominal u2 tracking cost
+        # Nominal u2 tracking cost
+        u2_track_cost = self.mp.AddQuadraticErrorCost(Q=w1*np.eye(3),x_desired=u2_nom,vars=u2)
        
         # Joint tracking cost
         joint_cost = self.mp.AddQuadraticErrorCost(Q=w2*np.eye(self.nv),x_desired=qdd_des,vars=qdd)
@@ -240,7 +244,7 @@ class ValkyrieASController(ValkyrieQPController):
         dynamics_constraint = self.AddDynamicsConstraint(M, qdd, Cv+tau_g, S.T, tau, contact_jacobians, f_contact)
 
         # Add interface constraint S'*tau + sum(J'*f_ext) = uV + N'*tau_0
-        self.AddInterfaceConstraint(S, contact_jacobians, f_contact, N, uV, tau, tau0)
+        self.AddInterfaceConstraint(S, contact_jacobians, f_contact, N, A_int, b_int, u2, tau, tau0)
 
         #DEBUG
         print(x_task)
