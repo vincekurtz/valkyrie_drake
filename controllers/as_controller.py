@@ -260,9 +260,13 @@ class ValkyrieASController(ValkyrieQPController):
         # Compute kinimatics, which will allow us to calculate key quantities
         cache = self.tree.doKinematics(q,qd)
 
+        # DEBUG
+        x_task = self.tree.centerOfMass(cache).reshape(3,1)
+        print(x_task)
+
         # Comput nominal input to abstract system (CoM velocity)
         x2 = np.array([0.0,0.0,0.9]).reshape(3,1)
-        u2_nom = np.zeros((3,1))
+        u2_nom = np.array([0.1, 0.0, 0.0]).reshape(3,1)
 
         tau = self.SolveWholeBodyQP(cache, context, q, qd, x2, u2_nom)
 
