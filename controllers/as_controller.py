@@ -278,7 +278,7 @@ class ValkyrieASController(ValkyrieQPController):
         u_task_trajectory = res.GetSolution(u_task)
 
         return u_lip_trajectory, u_task_trajectory
-
+    
     def SolveWholeBodyQP(self, cache, context, q, qd, x2, u2_nom):
         """
         Formulates and solves a quadratic program which enforces an approximate
@@ -297,13 +297,15 @@ class ValkyrieASController(ValkyrieQPController):
                 J_cj*qdd + J'_cj*qd == nu
                 nu_min <= nu <= nu_max
         """
+        
 
         ############## Tuneable Paramters ################
 
-        w1 = 1.0     # abstract model input weight
-        w2 = 10.0    # joint tracking weight
-        w3 = 200.0   # foot tracking weight
-        w4 = 100.0   # torso orientation weight
+        w1 = 1.0    # abstract model input weight
+        w2 = 0.5    # joint tracking weight
+        w3 = 50.0   # foot tracking weight
+        w4 = 50.0   # torso orientation weight
+        w5 = 0.1    # centroidal momentum weight
 
         kappa = 100      # Interface PD gains
         Kd_int = 5
@@ -314,11 +316,13 @@ class ValkyrieASController(ValkyrieQPController):
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
 
-        Kp_foot = 100.0   # foot position PD gains
-        Kd_foot = 10.0 
+        Kp_foot = 200.0   # foot position PD gains
+        Kd_foot = 20.0 
 
         Kp_torso = 500.0   # torso orientation PD gains
         Kd_torso = 50.0
+
+        Kp_h = 10.0    # Centroidal momentum P gain
 
         Kd_contact = 10.0  # Contact movement damping P gain
 
@@ -337,7 +341,10 @@ class ValkyrieASController(ValkyrieQPController):
         # Center of mass jacobian
         J_com = self.tree.centerOfMassJacobian(cache)
         Jd_qd_com = self.tree.centerOfMassJacobianDotTimesV(cache)
-       
+      
+        # Centroidal momentum matrix h = A*qd
+        A = self.tree.centroidalMomentumMatrix(cache)
+        Ad_qd = self.tree.centroidalMomentumMatrixDotTimesV(cache)
         
         # Foot Jacobians
         J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index)
@@ -401,6 +408,16 @@ class ValkyrieASController(ValkyrieQPController):
 
         rpydd_torso_des = Kp_torso*(rpy_torso_nom - rpy_torso) + Kd_torso*(rpyd_torso_nom - rpyd_torso)
 
+        # Compute desired centroidal momentum dot
+        h_com = np.dot(A, qd)[np.newaxis].T
+        _, xd_com_nom, _ = self.fsm.ComTrajectory(context.get_time())  # TODO: use u2_nom?
+        
+        h_com_nom = np.vstack([np.zeros((3,1)),M[0,0]*xd_com_nom])  # desired angular velocity is zero,
+                                                                    # CoM velocity matches the CoM trajectory
+        hd_com_des = Kp_h*(h_com_nom - h_com)
+
+        
+
         # Compute energy shaping-based interface
         # TODO: formulate as linear constraint on u2
         x_task = self.tree.centerOfMass(cache)[np.newaxis].T
@@ -432,6 +449,9 @@ class ValkyrieASController(ValkyrieQPController):
         
         # torso orientation cost
         torso_cost = self.AddJacobianTypeCost(J_torso, qdd, Jd_qd_torso, rpydd_torso_des, weight=w4)
+
+        # centroidal momentum cost
+        centroidal_cost = self.AddJacobianTypeCost(A, qdd, Ad_qd, hd_com_des, weight=w5)
             
         # Contact acceleration constraint
         for j in range(num_contacts):
@@ -476,6 +496,7 @@ class ValkyrieASController(ValkyrieQPController):
         u2_nom = np.zeros((3,1))
 
         tau = self.SolveWholeBodyQP(cache, context, q, qd, x2, u2_nom)
+        #tau = self.SolveWholeBodyQPQP(cache, context, q, qd)
 
         ## Compute dynamics quantities
         ##

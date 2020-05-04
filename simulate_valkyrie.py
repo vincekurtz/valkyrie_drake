@@ -10,7 +10,7 @@ robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_A_sim_drake
 robot_urdf = FindResourceOrThrow(robot_description_file)
 builder = DiagramBuilder()
 scene_graph = builder.AddSystem(SceneGraph())
-dt = 1e-3
+dt = 1e-2
 plant = builder.AddSystem(MultibodyPlant(time_step=dt))
 plant.RegisterAsSourceForSceneGraph(scene_graph)
 Parser(plant=plant).AddModelFromFile(robot_urdf)
