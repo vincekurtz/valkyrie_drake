@@ -104,12 +104,12 @@ class ValkyrieASController(ValkyrieQPController):
 
         w1 = 1e5    # abstract model input weight
         w2 = 0.5    # joint tracking weight
-        w3 = 1e5   # foot tracking weight
+        w3 = 1e4   # foot tracking weight
         w4 = 50.0   # torso orientation weight
         w5 = 0.1    # centroidal momentum weight
 
         kappa = 1e4      # Interface PD gains
-        Kd_int = 500
+        Kd_int = 100
 
         nu_min = -1e-10   # slack for contact constraint
         nu_max = 1e-10
@@ -325,7 +325,7 @@ class ValkyrieASController(ValkyrieQPController):
 
         M = self.tree.massMatrix(cache)
         J = self.tree.centerOfMassJacobian(cache)
-        kappa = 9000   # TODO: load all tuning params from separate file?
+        kappa = 1e4   # TODO: load all tuning params from separate file?
         V = 0.5*np.dot(np.dot(qd.T,M),qd) + kappa*err
         self.V.append(V)
 
