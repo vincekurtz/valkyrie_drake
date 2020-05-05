@@ -64,7 +64,7 @@ builder.Connect(
 # Set up a controller
 ctrl = ValkyrieASController(tree,plant,dt)
 controller = builder.AddSystem(ctrl)
-controller = builder.AddSystem(ValkyrieQPController(tree,plant))
+#controller = builder.AddSystem(ValkyrieQPController(tree,plant))
 builder.Connect(
         plant.get_state_output_port(),
         controller.get_input_port(0))

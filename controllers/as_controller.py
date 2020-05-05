@@ -95,7 +95,7 @@ class ValkyrieASController(ValkyrieQPController):
         w5 = 0.1    # centroidal momentum weight
 
         kappa = 1e4      # Interface PD gains
-        Kd_int = 200
+        Kd_int = 500
 
         nu_min = -1e-10   # slack for contact constraint
         nu_max = 1e-10
