@@ -109,7 +109,7 @@ class ValkyrieASController(ValkyrieQPController):
         w5 = 0.1    # centroidal momentum weight
 
         kappa = 1e4      # Interface PD gains
-        Kd_int = 100
+        Kd_int = 200
 
         nu_min = -1e-10   # slack for contact constraint
         nu_max = 1e-10
@@ -117,8 +117,8 @@ class ValkyrieASController(ValkyrieQPController):
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
 
-        Kp_foot = 100.0   # foot position PD gains
-        Kd_foot = 10.0 
+        Kp_foot = 500.0   # foot position PD gains
+        Kd_foot = 50.0 
 
         Kp_torso = 500.0   # torso orientation PD gains
         Kd_torso = 50.0
