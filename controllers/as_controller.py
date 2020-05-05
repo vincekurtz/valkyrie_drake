@@ -42,6 +42,20 @@ class ValkyrieASController(ValkyrieQPController):
         self.y1 = np.empty((3,1))   # concrete system output: true CoM position
         self.y2 = np.empty((3,1))   # abstract system output: desired CoM position
 
+    def get_foot_contact_points(self):
+        """
+        Return a tuple of points in the foot frame that represent contact locations. 
+        (this is a rough guess based on self.tree.getTerrainContactPoints)
+        """
+        corner_contacts = (
+                            np.array([-0.05, 0.07, -0.1]),  # slight inner approximation
+                            np.array([-0.05,-0.07, -0.1]),
+                            np.array([ 0.19,-0.07, -0.1]),
+                            np.array([ 0.19, 0.07, -0.1])
+                          )
+        return corner_contacts
+
+
     def AddInterfaceConstraint(self, S, contact_jacobians, contact_forces, N, A_int, b_int, u2, tau, tau0):
         """
         Add the interface constraint
@@ -88,9 +102,9 @@ class ValkyrieASController(ValkyrieQPController):
 
         ############## Tuneable Paramters ################
 
-        w1 = 1e6    # abstract model input weight
+        w1 = 1e4    # abstract model input weight
         w2 = 0.5    # joint tracking weight
-        w3 = 50.0   # foot tracking weight
+        w3 = 9e3   # foot tracking weight
         w4 = 50.0   # torso orientation weight
         w5 = 0.1    # centroidal momentum weight
 
@@ -111,7 +125,7 @@ class ValkyrieASController(ValkyrieQPController):
 
         Kp_k = 10.0    # angular momentum P gain
 
-        Kd_contact = 10.0  # Contact movement damping P gain
+        Kd_contact = 200.0  # Contact movement damping P gain
 
         ##################################################
         
@@ -284,8 +298,9 @@ class ValkyrieASController(ValkyrieQPController):
         cache = self.tree.doKinematics(q,qd)
 
         # Comput nominal input to abstract system (CoM velocity)
-        x2_nom  = np.array([0.0, 0.0, 0.9]).reshape(3,1)
-        u2_nom = -0.9*(self.x2 - x2_nom)
+        x2_nom = np.array([0.11, 0.0, 0.96]).reshape(3,1)
+        u2_nom = -1.0*(self.x2 - x2_nom)
+        #u2_nom = np.array([0.05, 0.0, 0.0]).reshape(3,1)  # just try to drive CoM forward
 
         tau, u2 = self.SolveWholeBodyQP(cache, context, q, qd, u2_nom)
 
