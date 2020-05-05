@@ -17,11 +17,11 @@ class ValkyrieASController(ValkyrieQPController):
 
         # Finite state machine defining desired ZMP trajectory,
         # foot placements, and swing foot trajectories.
-        #self.fsm = WalkingFSM(n_steps=4,
-        #                      step_length=0.5,
-        #                      step_height=0.05,
-        #                      step_time=0.9)
-        self.fsm = StandingFSM()
+        self.fsm = WalkingFSM(n_steps=4,
+                              step_length=0.5,
+                              step_height=0.05,
+                              step_time=0.9)
+        #self.fsm = StandingFSM()
 
         # Abstract Model Dynamics
         #
@@ -102,14 +102,14 @@ class ValkyrieASController(ValkyrieQPController):
 
         ############## Tuneable Paramters ################
 
-        w1 = 1e4    # abstract model input weight
-        w2 = 0.1    # joint tracking weight
-        w3 = 9e3   # foot tracking weight
+        w1 = 1e6    # abstract model input weight
+        w2 = 0.3    # joint tracking weight
+        w3 = 50.0   # foot tracking weight
         w4 = 50.0   # torso orientation weight
         w5 = 0.1    # centroidal momentum weight
 
-        kappa = 500      # Interface PD gains
-        Kd_int = 300
+        kappa = 9000      # Interface PD gains
+        Kd_int = 500
 
         nu_min = -1e-10   # slack for contact constraint
         nu_max = 1e-10
@@ -117,15 +117,15 @@ class ValkyrieASController(ValkyrieQPController):
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
 
-        Kp_foot = 500.0   # foot position PD gains
-        Kd_foot = 400.0 
+        Kp_foot = 100.0   # foot position PD gains
+        Kd_foot = 10.0 
 
         Kp_torso = 500.0   # torso orientation PD gains
         Kd_torso = 50.0
 
         Kp_k = 10.0    # angular momentum P gain
 
-        Kd_contact = 200.0  # Contact movement damping P gain
+        Kd_contact = 10.0  # Contact movement damping P gain
 
         ##################################################
         
@@ -225,6 +225,7 @@ class ValkyrieASController(ValkyrieQPController):
         x_task = self.tree.centerOfMass(cache)[np.newaxis].T
         Jbar_com = np.dot( np.linalg.inv( np.dot(J_com.T,J_com) + 1e-8*np.eye(self.np)), J_com.T)
         A_int = Kd_int*Jbar_com
+        #A_int = Kd_int*J_com.T   # TODO: does using this as a feedforward term make more sense???
         b_int = tau_g - kappa*np.dot(J_com.T, x_task-self.x2) - Kd_int*qd.reshape(self.nv,1)
 
         #################### QP Formulation ##################
@@ -298,9 +299,9 @@ class ValkyrieASController(ValkyrieQPController):
         cache = self.tree.doKinematics(q,qd)
 
         # Comput nominal input to abstract system (CoM velocity)
-        x2_nom = np.array([0.11, 0.0, 0.96]).reshape(3,1)
-        u2_nom = -1.0*(self.x2 - x2_nom)
-        #u2_nom = np.array([0.05, 0.0, 0.0]).reshape(3,1)  # just try to drive CoM forward
+        x2_des, x2d_des, x2dd_des = self.fsm.ComTrajectory(context.get_time())
+
+        u2_nom = x2d_des - 1.0*(self.x2 - x2_des) 
 
         tau, u2 = self.SolveWholeBodyQP(cache, context, q, qd, u2_nom)
 
@@ -324,7 +325,7 @@ class ValkyrieASController(ValkyrieQPController):
 
         M = self.tree.massMatrix(cache)
         J = self.tree.centerOfMassJacobian(cache)
-        kappa = 500
-        V = 0.5*np.dot(np.dot(qd.T,M),qd) + 500*err
+        kappa = 9000   # TODO: load all tuning params from separate file?
+        V = 0.5*np.dot(np.dot(qd.T,M),qd) + kappa*err
         self.V.append(V)
 
