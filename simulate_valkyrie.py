@@ -2,6 +2,7 @@
 
 from pydrake.all import *
 from utils.helpers import ValkyrieFixedPointState
+from utils.disturbance_system import DisturbanceSystem
 from controllers import ValkyriePDController, ValkyrieQPController, ValkyrieASController
 import numpy as np
 import matplotlib.pyplot as plt
@@ -42,6 +43,16 @@ plant.RegisterVisualGeometry(
 plant.Finalize()
 assert plant.geometry_source_is_registered()
 
+# Set up an external force
+disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
+                                                      "torso",                     # body to apply to
+                                                      np.asarray([0,0,0,0,-900,0]),  # wrench to apply
+                                                      1.0,                         # time
+                                                      0.05))                        # duration
+builder.Connect(
+        disturbance_sys.get_output_port(0),
+        plant.get_applied_spatial_force_input_port())
+
 # Set up the Scene Graph
 builder.Connect(
         scene_graph.get_query_output_port(),
@@ -53,7 +64,7 @@ builder.Connect(
 # Set up a controller
 ctrl = ValkyrieASController(tree,plant,dt)
 controller = builder.AddSystem(ctrl)
-#controller = builder.AddSystem(ValkyrieQPController(tree,plant))
+controller = builder.AddSystem(ValkyrieQPController(tree,plant))
 builder.Connect(
         plant.get_state_output_port(),
         controller.get_input_port(0))
@@ -82,7 +93,7 @@ state.SetFromVector(initial_state_vec)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(10.0)
+simulator.AdvanceTo(3.0)
 
 ####################################################################
 # Make some plots

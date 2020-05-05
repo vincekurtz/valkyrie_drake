@@ -21,7 +21,7 @@ class ValkyrieASController(ValkyrieQPController):
                               step_length=0.5,
                               step_height=0.05,
                               step_time=0.9)
-        #self.fsm = StandingFSM()
+        self.fsm = StandingFSM()
 
         # Abstract Model Dynamics
         #
@@ -41,20 +41,6 @@ class ValkyrieASController(ValkyrieQPController):
         self.err = []               # output error
         self.y1 = np.empty((3,1))   # concrete system output: true CoM position
         self.y2 = np.empty((3,1))   # abstract system output: desired CoM position
-
-   # def get_foot_contact_points(self):
-   #     """
-   #     Return a tuple of points in the foot frame that represent contact locations. 
-   #     (this is a rough guess based on self.tree.getTerrainContactPoints)
-   #     """
-   #     corner_contacts = (
-   #                         np.array([-0.047, 0.07, -0.1]),  # slight inner approximation
-   #                         np.array([-0.047,-0.07, -0.1]),
-   #                         np.array([ 0.19,-0.07, -0.1]),
-   #                         np.array([ 0.19, 0.07, -0.1])
-   #                       )
-   #     return corner_contacts
-
 
     def AddInterfaceConstraint(self, S, contact_jacobians, contact_forces, N, A_int, b_int, u2, tau, tau0):
         """
