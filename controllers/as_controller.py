@@ -48,8 +48,8 @@ class ValkyrieASController(ValkyrieQPController):
         (this is a rough guess based on self.tree.getTerrainContactPoints)
         """
         corner_contacts = (
-                            np.array([-0.05, 0.07, -0.1]),  # slight inner approximation
-                            np.array([-0.05,-0.07, -0.1]),
+                            np.array([-0.047, 0.07, -0.1]),  # slight inner approximation
+                            np.array([-0.047,-0.07, -0.1]),
                             np.array([ 0.19,-0.07, -0.1]),
                             np.array([ 0.19, 0.07, -0.1])
                           )
@@ -103,7 +103,7 @@ class ValkyrieASController(ValkyrieQPController):
         ############## Tuneable Paramters ################
 
         w1 = 1e4    # abstract model input weight
-        w2 = 0.5    # joint tracking weight
+        w2 = 0.1    # joint tracking weight
         w3 = 9e3   # foot tracking weight
         w4 = 50.0   # torso orientation weight
         w5 = 0.1    # centroidal momentum weight
@@ -117,8 +117,8 @@ class ValkyrieASController(ValkyrieQPController):
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
 
-        Kp_foot = 200.0   # foot position PD gains
-        Kd_foot = 20.0 
+        Kp_foot = 500.0   # foot position PD gains
+        Kd_foot = 400.0 
 
         Kp_torso = 500.0   # torso orientation PD gains
         Kd_torso = 50.0
