@@ -117,8 +117,8 @@ class ValkyrieASController(ValkyrieQPController):
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
 
-        Kp_foot = 100.0   # foot position PD gains
-        Kd_foot = 10.0 
+        Kp_foot = 200.0   # foot position PD gains
+        Kd_foot = 20.0 
 
         Kp_torso = 500.0   # torso orientation PD gains
         Kd_torso = 50.0
