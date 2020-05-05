@@ -42,18 +42,18 @@ class ValkyrieASController(ValkyrieQPController):
         self.y1 = np.empty((3,1))   # concrete system output: true CoM position
         self.y2 = np.empty((3,1))   # abstract system output: desired CoM position
 
-    def get_foot_contact_points(self):
-        """
-        Return a tuple of points in the foot frame that represent contact locations. 
-        (this is a rough guess based on self.tree.getTerrainContactPoints)
-        """
-        corner_contacts = (
-                            np.array([-0.047, 0.07, -0.1]),  # slight inner approximation
-                            np.array([-0.047,-0.07, -0.1]),
-                            np.array([ 0.19,-0.07, -0.1]),
-                            np.array([ 0.19, 0.07, -0.1])
-                          )
-        return corner_contacts
+   # def get_foot_contact_points(self):
+   #     """
+   #     Return a tuple of points in the foot frame that represent contact locations. 
+   #     (this is a rough guess based on self.tree.getTerrainContactPoints)
+   #     """
+   #     corner_contacts = (
+   #                         np.array([-0.047, 0.07, -0.1]),  # slight inner approximation
+   #                         np.array([-0.047,-0.07, -0.1]),
+   #                         np.array([ 0.19,-0.07, -0.1]),
+   #                         np.array([ 0.19, 0.07, -0.1])
+   #                       )
+   #     return corner_contacts
 
 
     def AddInterfaceConstraint(self, S, contact_jacobians, contact_forces, N, A_int, b_int, u2, tau, tau0):
@@ -104,7 +104,7 @@ class ValkyrieASController(ValkyrieQPController):
 
         w1 = 1e6    # abstract model input weight
         w2 = 0.5    # joint tracking weight
-        w3 = 1e4   # foot tracking weight
+        w3 = 1e5   # foot tracking weight
         w4 = 50.0   # torso orientation weight
         w5 = 0.1    # centroidal momentum weight
 
@@ -117,15 +117,15 @@ class ValkyrieASController(ValkyrieQPController):
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
 
-        Kp_foot = 150.0   # foot position PD gains
-        Kd_foot = 50.0 
+        Kp_foot = 100.0   # foot position PD gains
+        Kd_foot = 100.0 
 
         Kp_torso = 500.0   # torso orientation PD gains
         Kd_torso = 50.0
 
         Kp_k = 10.0    # angular momentum P gain
 
-        Kd_contact = 50.0  # Contact movement damping P gain
+        Kd_contact = 100.0  # Contact movement damping P gain
 
         ##################################################
         
