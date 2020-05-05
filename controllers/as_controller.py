@@ -152,7 +152,7 @@ class ValkyrieASController(ValkyrieQPController):
         # CoM angular momentum jacobian
         J_k = self.tree.centroidalMomentumMatrix(cache)[0:3,:]
         Jd_qd_k = self.tree.centroidalMomentumMatrixDotTimesV(cache)[0:3]
-        
+
         # Foot Jacobians
         J_left, Jd_qd_left = self.get_body_jacobian(cache, self.left_foot_index)
         J_right, Jd_qd_right = self.get_body_jacobian(cache, self.right_foot_index)
@@ -219,13 +219,12 @@ class ValkyrieASController(ValkyrieQPController):
         k_com = np.dot(J_k, qd)[np.newaxis].T
         k_com_nom = np.zeros((3,1))
         kd_com_des = Kp_k*(k_com_nom - k_com)
-        
+
         # Compute energy shaping-based interface as a linear constraint 
         # uV = tau_g - kappa*J'*(x_task-x2) - Kd*(qd-Jbar*u2) = A_int*u2 + b_int
         x_task = self.tree.centerOfMass(cache)[np.newaxis].T
         Jbar_com = np.dot( np.linalg.inv( np.dot(J_com.T,J_com) + 1e-8*np.eye(self.np)), J_com.T)
         A_int = Kd_int*Jbar_com
-        #A_int = Kd_int*J_com.T   # TODO: does using this as a feedforward term make more sense???
         b_int = tau_g - kappa*np.dot(J_com.T, x_task-self.x2) - Kd_int*qd.reshape(self.nv,1)
 
         #################### QP Formulation ##################
@@ -257,7 +256,7 @@ class ValkyrieASController(ValkyrieQPController):
         # torso orientation cost
         torso_cost = self.AddJacobianTypeCost(J_torso, qdd, Jd_qd_torso, rpydd_torso_des, weight=w4)
 
-        # angular momentum
+        # angular momentum cost
         angular_cost = self.AddJacobianTypeCost(J_k, qdd, Jd_qd_k, kd_com_des, weight=w5)
             
         # Contact acceleration constraint
