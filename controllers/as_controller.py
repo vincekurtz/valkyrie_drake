@@ -103,12 +103,12 @@ class ValkyrieASController(ValkyrieQPController):
         ############## Tuneable Paramters ################
 
         w1 = 1e6    # abstract model input weight
-        w2 = 0.3    # joint tracking weight
-        w3 = 50.0   # foot tracking weight
+        w2 = 0.5    # joint tracking weight
+        w3 = 1e4   # foot tracking weight
         w4 = 50.0   # torso orientation weight
         w5 = 0.1    # centroidal momentum weight
 
-        kappa = 9000      # Interface PD gains
+        kappa = 1e4      # Interface PD gains
         Kd_int = 500
 
         nu_min = -1e-10   # slack for contact constraint
@@ -117,15 +117,15 @@ class ValkyrieASController(ValkyrieQPController):
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
 
-        Kp_foot = 200.0   # foot position PD gains
-        Kd_foot = 20.0 
+        Kp_foot = 150.0   # foot position PD gains
+        Kd_foot = 50.0 
 
         Kp_torso = 500.0   # torso orientation PD gains
         Kd_torso = 50.0
 
         Kp_k = 10.0    # angular momentum P gain
 
-        Kd_contact = 10.0  # Contact movement damping P gain
+        Kd_contact = 50.0  # Contact movement damping P gain
 
         ##################################################
         
