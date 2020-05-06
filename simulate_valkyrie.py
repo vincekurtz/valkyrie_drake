@@ -7,9 +7,12 @@ from controllers import ValkyriePDController, ValkyrieQPController, ValkyrieASCo
 import numpy as np
 import matplotlib.pyplot as plt
 
+# Specify (potentially different) models for the simulator and for the controller
+assumed_robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_A_sim_drake_one_neck_dof_wide_ankle_rom.urdf"
+true_robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_modified.urdf"
+
 # Load the valkyrie model from a urdf file
-robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_A_sim_drake_one_neck_dof_wide_ankle_rom.urdf"
-robot_urdf = FindResourceOrThrow(robot_description_file)
+robot_urdf = FindResourceOrThrow(true_robot_description_file)
 builder = DiagramBuilder()
 scene_graph = builder.AddSystem(SceneGraph())
 dt = 5e-3
@@ -20,7 +23,8 @@ Parser(plant=plant).AddModelFromFile(robot_urdf)
 # Use the (admittedly depreciated) RigidBodyTree interface for dynamics
 # calculations, since python bindings for MultibodyPlant dynamics don't seem to 
 # exist yet. This should allow us to keep using MBP for the simulation, which seems to work a lot better.
-tree = RigidBodyTree(robot_urdf, FloatingBaseType.kRollPitchYaw)
+tree_robot_urdf = FindResourceOrThrow(assumed_robot_description_file)
+tree = RigidBodyTree(tree_robot_urdf, FloatingBaseType.kRollPitchYaw)
 
 # Add a flat ground with friction
 X_BG = RigidTransform()
@@ -44,14 +48,14 @@ plant.Finalize()
 assert plant.geometry_source_is_registered()
 
 # Set up an external force
-disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
-                                                      "torso",                     # body to apply to
-                                                      np.asarray([0,0,0,0,-550,0]),  # wrench to apply
-                                                      1.3,                         # time
-                                                      0.05))                        # duration
-builder.Connect(
-        disturbance_sys.get_output_port(0),
-        plant.get_applied_spatial_force_input_port())
+#disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
+#                                                      "torso",                     # body to apply to
+#                                                      np.asarray([0,0,0,0,-550,0]),  # wrench to apply
+#                                                      1.3,                         # time
+#                                                      0.05))                        # duration
+#builder.Connect(
+#        disturbance_sys.get_output_port(0),
+#        plant.get_applied_spatial_force_input_port())
 
 # Set up the Scene Graph
 builder.Connect(
