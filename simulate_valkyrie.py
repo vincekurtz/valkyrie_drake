@@ -46,8 +46,8 @@ assert plant.geometry_source_is_registered()
 # Set up an external force
 disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
                                                       "torso",                     # body to apply to
-                                                      np.asarray([0,0,0,0,-900,0]),  # wrench to apply
-                                                      1.0,                         # time
+                                                      np.asarray([0,0,0,0,-550,0]),  # wrench to apply
+                                                      1.3,                         # time
                                                       0.05))                        # duration
 builder.Connect(
         disturbance_sys.get_output_port(0),
@@ -93,7 +93,7 @@ state.SetFromVector(initial_state_vec)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(3.0)
+simulator.AdvanceTo(10.0)
 
 ####################################################################
 # Make some plots

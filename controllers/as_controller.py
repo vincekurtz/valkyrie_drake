@@ -21,7 +21,7 @@ class ValkyrieASController(ValkyrieQPController):
                               step_length=0.5,
                               step_height=0.05,
                               step_time=0.9)
-        self.fsm = StandingFSM()
+        #self.fsm = StandingFSM()
 
         # Abstract Model Dynamics
         #
