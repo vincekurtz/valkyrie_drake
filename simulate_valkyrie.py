@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 # Specify (potentially different) models for the simulator and for the controller
 assumed_robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_A_sim_drake_one_neck_dof_wide_ankle_rom.urdf"
 true_robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_modified.urdf"
+true_robot_description_file = assumed_robot_description_file
 
 # Load the valkyrie model from a urdf file
 robot_urdf = FindResourceOrThrow(true_robot_description_file)
@@ -44,14 +45,24 @@ plant.RegisterVisualGeometry(
         "ground_visual",
         np.array([0.5,0.5,0.5,0.0]))    # Color set to be completely transparent
 
+# Add some random objects on the ground and weld them to the world
+obj_file = FindResourceOrThrow("drake/manipulation/models/ycb/sdf/004_sugar_box.sdf")
+obj = Parser(plant=plant).AddModelFromFile(obj_file, "random_object")
+
+R = RollPitchYaw(np.asarray([0,0,0])).ToRotationMatrix()
+p = np.array([0.3,-0.01,0.0]).reshape(3,1)
+X = RigidTransform(R,p)
+plant.WeldFrames(plant.world_frame(),plant.GetFrameByName("base_link_sugar",obj),X)
+
+
 plant.Finalize()
 assert plant.geometry_source_is_registered()
 
 # Set up an external force
 #disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
 #                                                      "torso",                     # body to apply to
-#                                                      np.asarray([0,0,0,0,-550,0]),  # wrench to apply
-#                                                      1.3,                         # time
+#                                                      np.asarray([0,0,0,0,550,0]),  # wrench to apply
+#                                                      1.1,                         # time
 #                                                      0.05))                        # duration
 #builder.Connect(
 #        disturbance_sys.get_output_port(0),
