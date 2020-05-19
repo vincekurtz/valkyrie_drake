@@ -67,7 +67,6 @@ for i in range(15):
 
     r = np.random.uniform(low=r_min,high=r_max)
     p = np.random.uniform(low=p_min,high=p_max)
-    p = 0
     yy = np.random.uniform(low=yy_min,high=yy_max)
 
     # weld the block to the world at this pose
@@ -130,7 +129,7 @@ state.SetFromVector(initial_state_vec)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(10.0)
+simulator.AdvanceTo(15.0)
 
 ####################################################################
 # Make some plots
