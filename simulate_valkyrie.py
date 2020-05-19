@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 # Specify (potentially different) models for the simulator and for the controller
 assumed_robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_A_sim_drake_one_neck_dof_wide_ankle_rom.urdf"
 true_robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_modified.urdf"
-true_robot_description_file = assumed_robot_description_file
+#true_robot_description_file = assumed_robot_description_file
 
 # Load the valkyrie model from a urdf file
 robot_urdf = FindResourceOrThrow(true_robot_description_file)
@@ -46,34 +46,34 @@ plant.RegisterVisualGeometry(
         np.array([0.5,0.5,0.5,0.0]))    # Color set to be completely transparent
 
 # Add uneven terrain to the world, by placing a bunch of block randomly
-terrain_file = FindResourceOrThrow("drake/manipulation/models/ycb/sdf/block.sdf")
-np.random.seed(1)  # fix random seed for reproducability
-for i in range(15):
-    # load a block from a urdf file
-    terrain = Parser(plant=plant).AddModelFromFile(terrain_file, "terrain_block_%s" % i)
-
-    # Generate random RPY and position values
-    x_min = 0.25; x_max = 1.5
-    y_min = -0.3; y_max = 0.3
-    z_min = -0.01; z_max = 0.01
-
-    r_min = -np.pi/20; r_max = np.pi/20
-    p_min = -np.pi/20; p_max = np.pi/20
-    yy_min = -np.pi; yy_max = np.pi
-
-    x = np.random.uniform(low=x_min,high=x_max)
-    y = np.random.uniform(low=y_min,high=y_max)
-    z = np.random.uniform(low=z_min,high=z_max)
-
-    r = np.random.uniform(low=r_min,high=r_max)
-    p = np.random.uniform(low=p_min,high=p_max)
-    yy = np.random.uniform(low=yy_min,high=yy_max)
-
-    # weld the block to the world at this pose
-    R = RollPitchYaw(np.asarray([r,p,yy])).ToRotationMatrix()
-    p = np.array([x,y,z]).reshape(3,1)
-    X = RigidTransform(R,p)
-    plant.WeldFrames(plant.world_frame(),plant.GetFrameByName("base_link",terrain),X)
+#terrain_file = FindResourceOrThrow("drake/manipulation/models/ycb/sdf/block.sdf")
+#np.random.seed(1)  # fix random seed for reproducability
+#for i in range(15):
+#    # load a block from a urdf file
+#    terrain = Parser(plant=plant).AddModelFromFile(terrain_file, "terrain_block_%s" % i)
+#
+#    # Generate random RPY and position values
+#    x_min = 0.25; x_max = 1.5
+#    y_min = -0.3; y_max = 0.3
+#    z_min = -0.01; z_max = 0.01
+#
+#    r_min = -np.pi/20; r_max = np.pi/20
+#    p_min = -np.pi/20; p_max = np.pi/20
+#    yy_min = -np.pi; yy_max = np.pi
+#
+#    x = np.random.uniform(low=x_min,high=x_max)
+#    y = np.random.uniform(low=y_min,high=y_max)
+#    z = np.random.uniform(low=z_min,high=z_max)
+#
+#    r = np.random.uniform(low=r_min,high=r_max)
+#    p = np.random.uniform(low=p_min,high=p_max)
+#    yy = np.random.uniform(low=yy_min,high=yy_max)
+#
+#    # weld the block to the world at this pose
+#    R = RollPitchYaw(np.asarray([r,p,yy])).ToRotationMatrix()
+#    p = np.array([x,y,z]).reshape(3,1)
+#    X = RigidTransform(R,p)
+#    plant.WeldFrames(plant.world_frame(),plant.GetFrameByName("base_link",terrain),X)
 
 
 plant.Finalize()
@@ -99,8 +99,8 @@ builder.Connect(
 
 # Set up a controller
 ctrl = ValkyrieASController(tree,plant,dt)
+ctrl = ValkyrieQPController(tree,plant)
 controller = builder.AddSystem(ctrl)
-#controller = builder.AddSystem(ValkyrieQPController(tree,plant))
 builder.Connect(
         plant.get_state_output_port(),
         controller.get_input_port(0))
@@ -129,7 +129,7 @@ state.SetFromVector(initial_state_vec)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(15.0)
+simulator.AdvanceTo(3.0)
 
 ####################################################################
 # Make some plots
@@ -171,6 +171,13 @@ plt.plot(ctrl.t, ctrl.err, label="Output Error", color='green', linewidth='2')
 plt.ylabel("Output Error")
 plt.xlabel("time")
 
-plt.show()
+# Plot torque profile
+plt.figure()
+plt.plot(ctrl.t, ctrl.tau[:,1:].T, linewidth='2')
+plt.ylabel("Joint Torques")
+plt.xlabel("time")
+plt.title("Torque Profile")
 
+
+plt.show()
 

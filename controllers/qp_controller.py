@@ -10,9 +10,9 @@ class ValkyrieQPController(ValkyriePDController):
     def __init__(self, tree, plant):
         ValkyriePDController.__init__(self, tree, plant)
 
-        self.fsm = WalkingFSM(n_steps=4,         # Finite State Machine describing CoM trajectory,
+        self.fsm = WalkingFSM(n_steps=8,         # Finite State Machine describing CoM trajectory,
                               step_length=0.50,   # swing foot trajectories, and stance phases.
-                              step_height=0.05,
+                              step_height=0.10,
                               step_time=1.0)
         #self.fsm = StandingFSM()
 
@@ -24,6 +24,14 @@ class ValkyrieQPController(ValkyriePDController):
         self.left_foot_index = self.tree.FindBody('leftFoot').get_body_index()
         self.world_index = self.tree.world().get_body_index()
         self.torso_index = self.tree.FindBody('torso').get_body_index()
+        
+        # Stuff to record for later plotting
+        self.t = []                 # timesteps
+        self.V = []                 # simulation function (not relevant here, just so plots don't break)
+        self.err = []               # output error
+        self.y1 = np.empty((3,1))   # concrete system output: true CoM position
+        self.y2 = np.empty((3,1))   # abstract system output: desired CoM position
+        self.tau = np.empty((self.nu,1))  # applied control torques
 
     def get_foot_contact_points(self):
         """
@@ -184,6 +192,8 @@ class ValkyrieQPController(ValkyriePDController):
 
         Kp_com = 500   # Center of mass PD gains
         Kd_com = 50
+        Kp_com = 1e4
+        Kd_com = 500
 
         Kp_h = 10.0    # Centroid momentum P gain
 
@@ -356,3 +366,21 @@ class ValkyrieQPController(ValkyriePDController):
         u = self.SolveWholeBodyQP(cache, context, q, qd)
 
         output[:] = u
+        
+        # Record stuff for later plotting
+        self.t.append(context.get_time())
+
+        y1 = self.tree.centerOfMass(cache).reshape(3,1)
+        x_com_nom, _, _ = self.fsm.ComTrajectory(context.get_time())
+        y2 = x_com_nom
+        self.y1 = np.hstack([self.y1, y1])
+        self.y2 = np.hstack([self.y2, y2])
+
+        err = np.dot((y1-y2).T,(y1-y2))[0,0]
+        self.err.append(err)
+
+        self.V.append(err)     # placeholder for simulation function
+
+        self.tau = np.hstack([self.tau,u.reshape(self.nu,1)])
+
+

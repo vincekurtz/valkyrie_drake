@@ -41,6 +41,7 @@ class ValkyrieASController(ValkyrieQPController):
         self.err = []               # output error
         self.y1 = np.empty((3,1))   # concrete system output: true CoM position
         self.y2 = np.empty((3,1))   # abstract system output: desired CoM position
+        self.tau = np.empty((self.nu,1))  # applied control torques
 
     def AddInterfaceConstraint(self, S, contact_jacobians, contact_forces, N, A_int, b_int, u2, tau, tau0):
         """
@@ -314,3 +315,4 @@ class ValkyrieASController(ValkyrieQPController):
         V = 0.5*np.dot(np.dot(qd.T,M),qd) + kappa*err
         self.V.append(V)
 
+        self.tau = np.hstack([self.tau,tau.reshape(self.nu,1)])
