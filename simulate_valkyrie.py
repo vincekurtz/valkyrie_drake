@@ -45,14 +45,36 @@ plant.RegisterVisualGeometry(
         "ground_visual",
         np.array([0.5,0.5,0.5,0.0]))    # Color set to be completely transparent
 
-# Add some random objects on the ground and weld them to the world
-obj_file = FindResourceOrThrow("drake/manipulation/models/ycb/sdf/004_sugar_box.sdf")
-obj = Parser(plant=plant).AddModelFromFile(obj_file, "random_object")
+# Add uneven terrain to the world, by placing a bunch of block randomly
+terrain_file = FindResourceOrThrow("drake/manipulation/models/ycb/sdf/block.sdf")
+np.random.seed(1)  # fix random seed for reproducability
+for i in range(15):
+    # load a block from a urdf file
+    terrain = Parser(plant=plant).AddModelFromFile(terrain_file, "terrain_block_%s" % i)
 
-R = RollPitchYaw(np.asarray([0,0,0])).ToRotationMatrix()
-p = np.array([0.3,-0.01,0.0]).reshape(3,1)
-X = RigidTransform(R,p)
-plant.WeldFrames(plant.world_frame(),plant.GetFrameByName("base_link_sugar",obj),X)
+    # Generate random RPY and position values
+    x_min = 0.25; x_max = 1.5
+    y_min = -0.3; y_max = 0.3
+    z_min = -0.01; z_max = 0.01
+
+    r_min = -np.pi/20; r_max = np.pi/20
+    p_min = -np.pi/20; p_max = np.pi/20
+    yy_min = -np.pi; yy_max = np.pi
+
+    x = np.random.uniform(low=x_min,high=x_max)
+    y = np.random.uniform(low=y_min,high=y_max)
+    z = np.random.uniform(low=z_min,high=z_max)
+
+    r = np.random.uniform(low=r_min,high=r_max)
+    p = np.random.uniform(low=p_min,high=p_max)
+    p = 0
+    yy = np.random.uniform(low=yy_min,high=yy_max)
+
+    # weld the block to the world at this pose
+    R = RollPitchYaw(np.asarray([r,p,yy])).ToRotationMatrix()
+    p = np.array([x,y,z]).reshape(3,1)
+    X = RigidTransform(R,p)
+    plant.WeldFrames(plant.world_frame(),plant.GetFrameByName("base_link",terrain),X)
 
 
 plant.Finalize()
