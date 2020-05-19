@@ -207,9 +207,9 @@ class ValkyrieASController(ValkyrieQPController):
         kd_com_des = Kp_k*(k_com_nom - k_com)
 
         # Compute energy shaping-based interface as a linear constraint 
-        # uV = tau_g - kappa*J'*(x_task-x2) - Kd*(qd-Jbar*u2) = A_int*u2 + b_int
+        # uV = tau_g - kappa*J'*(x_task-x2) - Kd*(qd-J'*u2) = A_int*u2 + b_int
         x_task = self.tree.centerOfMass(cache)[np.newaxis].T
-        Jbar_com = np.dot( np.linalg.inv( np.dot(J_com.T,J_com) + 1e-8*np.eye(self.np)), J_com.T)
+        Jbar_com = J_com.T
         A_int = Kd_int*Jbar_com
         b_int = tau_g - kappa*np.dot(J_com.T, x_task-self.x2) - Kd_int*qd.reshape(self.nv,1)
 
