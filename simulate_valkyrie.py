@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 # Specify (potentially different) models for the simulator and for the controller
 assumed_robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_A_sim_drake_one_neck_dof_wide_ankle_rom.urdf"
 true_robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_modified.urdf"
-true_robot_description_file = assumed_robot_description_file
+#true_robot_description_file = assumed_robot_description_file
 
 # Load the valkyrie model from a urdf file
 robot_urdf = FindResourceOrThrow(true_robot_description_file)
@@ -82,19 +82,19 @@ plant.Finalize()
 assert plant.geometry_source_is_registered()
 
 # Set up an external force
-np.random.seed(5)
-time = np.random.uniform(low=1.0,high=3.5)
-magnitude = np.random.uniform(low=200,high=500)
-direction = np.random.choice([-1,1])
-
-disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
-                                                      "torso",                     # body to apply to
-                                                      np.asarray([0,0,0,0,direction*magnitude,0]),  # wrench to apply
-                                                      time,                         # time
-                                                      0.05))                        # duration
-builder.Connect(
-        disturbance_sys.get_output_port(0),
-        plant.get_applied_spatial_force_input_port())
+#np.random.seed(5)
+#time = np.random.uniform(low=1.0,high=3.5)
+#magnitude = np.random.uniform(low=200,high=500)
+#direction = np.random.choice([-1,1])
+#
+#disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
+#                                                      "torso",                     # body to apply to
+#                                                      np.asarray([0,0,0,0,direction*magnitude,0]),  # wrench to apply
+#                                                      time,                         # time
+#                                                      0.05))                        # duration
+#builder.Connect(
+#        disturbance_sys.get_output_port(0),
+#        plant.get_applied_spatial_force_input_port())
 
 # Set up the Scene Graph
 builder.Connect(
@@ -105,8 +105,8 @@ builder.Connect(
         scene_graph.get_source_pose_port(plant.get_source_id()))
 
 # Set up a controller
-ctrl = ValkyrieASController(tree,plant,dt)
-#ctrl = ValkyrieQPController(tree,plant)
+#ctrl = ValkyrieASController(tree,plant,dt)
+ctrl = ValkyrieQPController(tree,plant)
 controller = builder.AddSystem(ctrl)
 builder.Connect(
         plant.get_state_output_port(),

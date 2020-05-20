@@ -18,9 +18,9 @@ class ValkyrieASController(ValkyrieQPController):
         # Finite state machine defining desired ZMP trajectory,
         # foot placements, and swing foot trajectories.
         self.fsm = WalkingFSM(n_steps=8,
-                              step_length=0.5,
-                              step_height=0.10,
-                              step_time=0.9)
+                              step_length=0.70,
+                              step_height=0.05,
+                              step_time=1.0)
         #self.fsm = StandingFSM()
 
         # Abstract Model Dynamics
