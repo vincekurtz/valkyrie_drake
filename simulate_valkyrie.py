@@ -46,50 +46,55 @@ plant.RegisterVisualGeometry(
         np.array([0.5,0.5,0.5,0.0]))    # Color set to be completely transparent
 
 # Add uneven terrain to the world, by placing a bunch of block randomly
-terrain_file = FindResourceOrThrow("drake/manipulation/models/ycb/sdf/block.sdf")
-np.random.seed(10)  # fix random seed for reproducability
-for i in range(15):
-    # load a block from a urdf file
-    terrain = Parser(plant=plant).AddModelFromFile(terrain_file, "terrain_block_%s" % i)
-
-    # Generate random RPY and position values
-    x_min = 0.25; x_max = 1.5
-    y_min = -0.3; y_max = 0.3
-    z_min = -0.015; z_max = 0.002
-
-    r_min = -np.pi/20; r_max = np.pi/20
-    p_min = -np.pi/20; p_max = np.pi/20
-    yy_min = -np.pi; yy_max = np.pi
-
-    x = np.random.uniform(low=x_min,high=x_max)
-    y = np.random.uniform(low=y_min,high=y_max)
-    z = np.random.uniform(low=z_min,high=z_max)
-
-    r = np.random.uniform(low=r_min,high=r_max)
-    r = 0
-    p = np.random.uniform(low=p_min,high=p_max)
-    p = 0
-    yy = np.random.uniform(low=yy_min,high=yy_max)
-
-    # weld the block to the world at this pose
-    R = RollPitchYaw(np.asarray([r,p,yy])).ToRotationMatrix()
-    p = np.array([x,y,z]).reshape(3,1)
-    X = RigidTransform(R,p)
-    plant.WeldFrames(plant.world_frame(),plant.GetFrameByName("base_link",terrain),X)
+#terrain_file = FindResourceOrThrow("drake/manipulation/models/ycb/sdf/block.sdf")
+#np.random.seed(10)  # fix random seed for reproducability
+#for i in range(15):
+#    # load a block from a urdf file
+#    terrain = Parser(plant=plant).AddModelFromFile(terrain_file, "terrain_block_%s" % i)
+#
+#    # Generate random RPY and position values
+#    x_min = 0.25; x_max = 1.5
+#    y_min = -0.3; y_max = 0.3
+#    z_min = -0.015; z_max = 0.002
+#
+#    r_min = -np.pi/20; r_max = np.pi/20
+#    p_min = -np.pi/20; p_max = np.pi/20
+#    yy_min = -np.pi; yy_max = np.pi
+#
+#    x = np.random.uniform(low=x_min,high=x_max)
+#    y = np.random.uniform(low=y_min,high=y_max)
+#    z = np.random.uniform(low=z_min,high=z_max)
+#
+#    r = np.random.uniform(low=r_min,high=r_max)
+#    r = 0
+#    p = np.random.uniform(low=p_min,high=p_max)
+#    p = 0
+#    yy = np.random.uniform(low=yy_min,high=yy_max)
+#
+#    # weld the block to the world at this pose
+#    R = RollPitchYaw(np.asarray([r,p,yy])).ToRotationMatrix()
+#    p = np.array([x,y,z]).reshape(3,1)
+#    X = RigidTransform(R,p)
+#    plant.WeldFrames(plant.world_frame(),plant.GetFrameByName("base_link",terrain),X)
 
 
 plant.Finalize()
 assert plant.geometry_source_is_registered()
 
 # Set up an external force
-#disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
-#                                                      "torso",                     # body to apply to
-#                                                      np.asarray([0,0,0,0,-200,0]),  # wrench to apply
-#                                                      1.1,                         # time
-#                                                      0.05))                        # duration
-#builder.Connect(
-#        disturbance_sys.get_output_port(0),
-#        plant.get_applied_spatial_force_input_port())
+np.random.seed(5)
+time = np.random.uniform(low=1.0,high=3.5)
+magnitude = np.random.uniform(low=200,high=500)
+direction = np.random.choice([-1,1])
+
+disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
+                                                      "torso",                     # body to apply to
+                                                      np.asarray([0,0,0,0,direction*magnitude,0]),  # wrench to apply
+                                                      time,                         # time
+                                                      0.05))                        # duration
+builder.Connect(
+        disturbance_sys.get_output_port(0),
+        plant.get_applied_spatial_force_input_port())
 
 # Set up the Scene Graph
 builder.Connect(
@@ -100,8 +105,8 @@ builder.Connect(
         scene_graph.get_source_pose_port(plant.get_source_id()))
 
 # Set up a controller
-#ctrl = ValkyrieASController(tree,plant,dt)
-ctrl = ValkyrieQPController(tree,plant)
+ctrl = ValkyrieASController(tree,plant,dt)
+#ctrl = ValkyrieQPController(tree,plant)
 controller = builder.AddSystem(ctrl)
 builder.Connect(
         plant.get_state_output_port(),
