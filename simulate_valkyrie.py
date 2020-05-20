@@ -47,7 +47,7 @@ plant.RegisterVisualGeometry(
 
 # Add uneven terrain to the world, by placing a bunch of block randomly
 terrain_file = FindResourceOrThrow("drake/manipulation/models/ycb/sdf/block.sdf")
-np.random.seed(1)  # fix random seed for reproducability
+np.random.seed(10)  # fix random seed for reproducability
 for i in range(15):
     # load a block from a urdf file
     terrain = Parser(plant=plant).AddModelFromFile(terrain_file, "terrain_block_%s" % i)
@@ -55,7 +55,7 @@ for i in range(15):
     # Generate random RPY and position values
     x_min = 0.25; x_max = 1.5
     y_min = -0.3; y_max = 0.3
-    z_min = -0.01; z_max = 0.01
+    z_min = -0.015; z_max = 0.002
 
     r_min = -np.pi/20; r_max = np.pi/20
     p_min = -np.pi/20; p_max = np.pi/20
@@ -66,7 +66,9 @@ for i in range(15):
     z = np.random.uniform(low=z_min,high=z_max)
 
     r = np.random.uniform(low=r_min,high=r_max)
+    r = 0
     p = np.random.uniform(low=p_min,high=p_max)
+    p = 0
     yy = np.random.uniform(low=yy_min,high=yy_max)
 
     # weld the block to the world at this pose
@@ -98,8 +100,8 @@ builder.Connect(
         scene_graph.get_source_pose_port(plant.get_source_id()))
 
 # Set up a controller
-ctrl = ValkyrieASController(tree,plant,dt)
-#ctrl = ValkyrieQPController(tree,plant)
+#ctrl = ValkyrieASController(tree,plant,dt)
+ctrl = ValkyrieQPController(tree,plant)
 controller = builder.AddSystem(ctrl)
 builder.Connect(
         plant.get_state_output_port(),
