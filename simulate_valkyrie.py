@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 # Specify (potentially different) models for the simulator and for the controller
 assumed_robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_A_sim_drake_one_neck_dof_wide_ankle_rom.urdf"
 true_robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_modified.urdf"
-#true_robot_description_file = assumed_robot_description_file
+true_robot_description_file = assumed_robot_description_file
 
 # Load the valkyrie model from a urdf file
 robot_urdf = FindResourceOrThrow(true_robot_description_file)
@@ -105,8 +105,8 @@ builder.Connect(
         scene_graph.get_source_pose_port(plant.get_source_id()))
 
 # Set up a controller
-#ctrl = ValkyrieASController(tree,plant,dt)
-ctrl = ValkyrieQPController(tree,plant)
+ctrl = ValkyrieASController(tree,plant,dt)
+#ctrl = ValkyrieQPController(tree,plant)
 controller = builder.AddSystem(ctrl)
 builder.Connect(
         plant.get_state_output_port(),
