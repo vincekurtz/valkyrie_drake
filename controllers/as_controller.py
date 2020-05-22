@@ -96,7 +96,7 @@ class ValkyrieASController(ValkyrieQPController):
         w5 = 0.1    # centroidal momentum weight
 
         kappa = 1e4      # Interface PD gains
-        Kd_int = 500
+        Kd_int = 1000
 
         nu_min = -1e-10   # slack for contact constraint
         nu_max = 1e-10
@@ -286,6 +286,8 @@ class ValkyrieASController(ValkyrieQPController):
 
         # Comput nominal input to abstract system (CoM velocity)
         x2_des, x2d_des, x2dd_des = self.fsm.ComTrajectory(context.get_time())
+
+        self.x2 = x2_des  #DEBUG: for tuning standard QP approach gains
 
         u2_nom = x2d_des - 1.0*(self.x2 - x2_des) 
 

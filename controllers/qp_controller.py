@@ -190,15 +190,13 @@ class ValkyrieQPController(ValkyriePDController):
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
 
-        Kp_com = 500   # Center of mass PD gains
-        Kd_com = 50
-        Kp_com = 1e4
-        Kd_com = 500
+        Kp_com = 3e3   # Center of mass PD gains
+        Kd_com = 50.0
 
         Kp_h = 10.0    # Centroid momentum P gain
 
-        Kp_foot = 100.0   # foot position PD gains
-        Kd_foot = 10.0 
+        Kp_foot = 500.0   # foot position PD gains
+        Kd_foot = 50.0 
 
         Kp_torso = 500.0   # torso orientation PD gains
         Kd_torso = 50.0

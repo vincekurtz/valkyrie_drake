@@ -16,7 +16,7 @@ class StandingFSM(object):
     A finite state machine describing simply standing in double support at the given position.
     """
     def __init__(self):
-        self.x_com_init = np.asarray([[0.0], [0.0], [0.96]])
+        self.x_com_init = np.asarray([[0.0], [0.0], [0.90]])
         self.x_right_init = np.asarray([[-0.065], [-0.138], [0.1]])
         self.x_left_init = np.asarray([[-0.065], [0.138], [0.1]])
 
@@ -77,7 +77,7 @@ class WalkingFSM(object):
         self.total_time = self.step_time*self.n_phases  
 
         # initial CoM and foot positions
-        self.x_com_init = np.asarray([[0.0], [0.0], [1.03]])
+        self.x_com_init = np.asarray([[0.0], [0.0], [0.97]])
         self.xd_com_init = np.asarray([[0.0], [0.0], [0.0]])
 
         self.fc_offset = -0.065   # The foot frame is this far from the foot's center
