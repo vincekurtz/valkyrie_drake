@@ -47,7 +47,7 @@ plant.RegisterVisualGeometry(
 
 # Add uneven terrain to the world, by placing a bunch of block randomly
 #terrain_file = FindResourceOrThrow("drake/manipulation/models/ycb/sdf/block.sdf")
-#np.random.seed(10)  # fix random seed for reproducability
+#np.random.seed(0)  # fix random seed for reproducability
 #for i in range(15):
 #    # load a block from a urdf file
 #    terrain = Parser(plant=plant).AddModelFromFile(terrain_file, "terrain_block_%s" % i)
@@ -82,19 +82,19 @@ plant.Finalize()
 assert plant.geometry_source_is_registered()
 
 # Set up an external force
-#np.random.seed(5)
-#time = np.random.uniform(low=1.0,high=3.5)
-#magnitude = np.random.uniform(low=200,high=500)
-#direction = np.random.choice([-1,1])
-#
-#disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
-#                                                      "torso",                     # body to apply to
-#                                                      np.asarray([0,0,0,0,direction*magnitude,0]),  # wrench to apply
-#                                                      time,                         # time
-#                                                      0.05))                        # duration
-#builder.Connect(
-#        disturbance_sys.get_output_port(0),
-#        plant.get_applied_spatial_force_input_port())
+np.random.seed(10)
+time = np.random.uniform(low=1.0,high=3.5)
+magnitude = np.random.uniform(low=400,high=600)
+direction = np.random.choice([-1,1])
+
+disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
+                                                      "torso",                     # body to apply to
+                                                      np.asarray([0,0,0,0,direction*magnitude,0]),  # wrench to apply
+                                                      time,                         # time
+                                                      0.05))                        # duration
+builder.Connect(
+        disturbance_sys.get_output_port(0),
+        plant.get_applied_spatial_force_input_port())
 
 # Set up the Scene Graph
 builder.Connect(
@@ -136,7 +136,7 @@ state.SetFromVector(initial_state_vec)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(5.0)
+simulator.AdvanceTo(6.0)
 
 ####################################################################
 # Make some plots
