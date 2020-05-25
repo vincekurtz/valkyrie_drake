@@ -7,10 +7,39 @@ from controllers import ValkyriePDController, ValkyrieQPController, ValkyrieASCo
 import numpy as np
 import matplotlib.pyplot as plt
 
+######################################################################
+# Simulation Parameters
+######################################################################
+
+# Specify whether the controller should assume an incorrect model
+use_incorrect_model = False
+model_num = 0    # incorrect model in [0,10] to use if use_incorrect_model is True
+
+# Specify whether to add a random lateral push
+add_random_push = False
+push_seed = 0
+
+# Specify whether to add uneven terrain
+add_uneven_terrain = False
+terrain_seed = 0   # random seed used to generate uneven terrain
+
+# Specify control method: "AS" (our proposed approach) or "QP" (standard QP)
+control_method = "AS"
+
+# Specify total simulation time in seconds
+sim_time = 10.0
+
+# Specify whether to make plots at the end
+make_plots = True
+
+######################################################################
+
 # Specify (potentially different) models for the simulator and for the controller
 assumed_robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_A_sim_drake_one_neck_dof_wide_ankle_rom.urdf"
-true_robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_modified.urdf"
-true_robot_description_file = assumed_robot_description_file
+if use_incorrect_model:
+    true_robot_description_file = "drake/examples/valkyrie/urdf/urdf/valkyrie_modified_%s.urdf" % model_num
+else:
+    true_robot_description_file = assumed_robot_description_file
 
 # Load the valkyrie model from a urdf file
 robot_urdf = FindResourceOrThrow(true_robot_description_file)
@@ -45,56 +74,58 @@ plant.RegisterVisualGeometry(
         "ground_visual",
         np.array([0.5,0.5,0.5,0.0]))    # Color set to be completely transparent
 
+if add_uneven_terrain:
 # Add uneven terrain to the world, by placing a bunch of block randomly
-terrain_file = FindResourceOrThrow("drake/manipulation/models/ycb/sdf/block.sdf")
-np.random.seed(10)  # fix random seed for reproducability
-for i in range(15):
-    # load a block from a urdf file
-    terrain = Parser(plant=plant).AddModelFromFile(terrain_file, "terrain_block_%s" % i)
-
-    # Generate random RPY and position values
-    x_min = 0.25; x_max = 1.5
-    y_min = -0.3; y_max = 0.3
-    z_min = -0.015; z_max = 0.002
-
-    r_min = -np.pi/20; r_max = np.pi/20
-    p_min = -np.pi/20; p_max = np.pi/20
-    yy_min = -np.pi; yy_max = np.pi
-
-    x = np.random.uniform(low=x_min,high=x_max)
-    y = np.random.uniform(low=y_min,high=y_max)
-    z = np.random.uniform(low=z_min,high=z_max)
-
-    r = np.random.uniform(low=r_min,high=r_max)
-    r = 0
-    p = np.random.uniform(low=p_min,high=p_max)
-    p = 0
-    yy = np.random.uniform(low=yy_min,high=yy_max)
-
-    # weld the block to the world at this pose
-    R = RollPitchYaw(np.asarray([r,p,yy])).ToRotationMatrix()
-    p = np.array([x,y,z]).reshape(3,1)
-    X = RigidTransform(R,p)
-    plant.WeldFrames(plant.world_frame(),plant.GetFrameByName("base_link",terrain),X)
+    terrain_file = FindResourceOrThrow("drake/manipulation/models/ycb/sdf/block.sdf")
+    np.random.seed(terrain_seed)  # fix random seed for reproducability
+    for i in range(15):
+        # load a block from a urdf file
+        terrain = Parser(plant=plant).AddModelFromFile(terrain_file, "terrain_block_%s" % i)
+    
+        # Generate random RPY and position values
+        x_min = 0.25; x_max = 1.5
+        y_min = -0.3; y_max = 0.3
+        z_min = -0.015; z_max = 0.002
+    
+        r_min = -np.pi/20; r_max = np.pi/20
+        p_min = -np.pi/20; p_max = np.pi/20
+        yy_min = -np.pi; yy_max = np.pi
+    
+        x = np.random.uniform(low=x_min,high=x_max)
+        y = np.random.uniform(low=y_min,high=y_max)
+        z = np.random.uniform(low=z_min,high=z_max)
+    
+        r = np.random.uniform(low=r_min,high=r_max)
+        r = 0
+        p = np.random.uniform(low=p_min,high=p_max)
+        p = 0
+        yy = np.random.uniform(low=yy_min,high=yy_max)
+    
+        # weld the block to the world at this pose
+        R = RollPitchYaw(np.asarray([r,p,yy])).ToRotationMatrix()
+        p = np.array([x,y,z]).reshape(3,1)
+        X = RigidTransform(R,p)
+        plant.WeldFrames(plant.world_frame(),plant.GetFrameByName("base_link",terrain),X)
 
 
 plant.Finalize()
 assert plant.geometry_source_is_registered()
 
-# Set up an external force
-#np.random.seed(10)
-#time = np.random.uniform(low=1.0,high=3.5)
-#magnitude = np.random.uniform(low=400,high=600)
-#direction = np.random.choice([-1,1])
-#
-#disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
-#                                                      "torso",                     # body to apply to
-#                                                      np.asarray([0,0,0,0,direction*magnitude,0]),  # wrench to apply
-#                                                      time,                         # time
-#                                                      0.05))                        # duration
-#builder.Connect(
-#        disturbance_sys.get_output_port(0),
-#        plant.get_applied_spatial_force_input_port())
+if add_random_push:
+    # Set up an external force
+    np.random.seed(push_seed)
+    time = np.random.uniform(low=1.0,high=3.5)
+    magnitude = np.random.uniform(low=400,high=600)
+    direction = np.random.choice([-1,1])
+    
+    disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
+                                                          "torso",                     # body to apply to
+                                                          np.asarray([0,0,0,0,direction*magnitude,0]),  # wrench to apply
+                                                          time,                         # time
+                                                          0.05))                        # duration
+    builder.Connect(
+            disturbance_sys.get_output_port(0),
+            plant.get_applied_spatial_force_input_port())
 
 # Set up the Scene Graph
 builder.Connect(
@@ -105,8 +136,13 @@ builder.Connect(
         scene_graph.get_source_pose_port(plant.get_source_id()))
 
 # Set up a controller
-ctrl = ValkyrieASController(tree,plant,dt)
-#ctrl = ValkyrieQPController(tree,plant)
+if control_method == "AS":
+    ctrl = ValkyrieASController(tree,plant,dt)
+elif control_method == "QP":
+    ctrl = ValkyrieQPController(tree,plant)
+else:
+    raise(ValueError("invalid control method %s" % control_method))
+
 controller = builder.AddSystem(ctrl)
 builder.Connect(
         plant.get_state_output_port(),
@@ -136,55 +172,55 @@ state.SetFromVector(initial_state_vec)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(20.0)
-
-####################################################################
-# Make some plots
-####################################################################
-
-# Plot of y1 vs y2
-plt.figure()
-plt.subplot(3,1,1)
-plt.plot(ctrl.t, ctrl.y1[0,1:], label="actual", linewidth='2')
-plt.plot(ctrl.t, ctrl.y2[0,1:], "--", label="desired", linewidth='2')
-plt.ylabel("x")
-#plt.ylim(-2,2)
-plt.legend()
-plt.title("CoM Position Tracking")
-
-plt.subplot(3,1,2)
-plt.plot(ctrl.t, ctrl.y1[1,1:], label="actual", linewidth='2')
-plt.plot(ctrl.t, ctrl.y2[1,1:], "--", label="desired", linewidth='2')
-plt.ylabel("y")
-#plt.ylim(-2,2)
-
-plt.subplot(3,1,3)
-plt.plot(ctrl.t, ctrl.y1[2,1:], label="actual", linewidth='2')
-plt.plot(ctrl.t, ctrl.y2[2,1:], "--", label="desired", linewidth='2')
-plt.ylabel("z")
-plt.xlabel("time")
-#plt.ylim(-2,2)
+simulator.AdvanceTo(sim_time)
 
 
-# Plot of simulation function vs error
-plt.figure()
-plt.subplot(2,1,1)
-plt.plot(ctrl.t, ctrl.V, label="Simulation Function", linewidth='2')
-plt.ylabel("Simulation Function")
-plt.title("Simulation Fcn vs. Output Error")
+if make_plots:
+    # make some plots of the results
 
-plt.subplot(2,1,2)
-plt.plot(ctrl.t, ctrl.err, label="Output Error", color='green', linewidth='2')
-plt.ylabel("Output Error")
-plt.xlabel("time")
+    # Plot of y1 vs y2
+    plt.figure()
+    plt.subplot(3,1,1)
+    plt.plot(ctrl.t, ctrl.y1[0,1:], label="actual", linewidth='2')
+    plt.plot(ctrl.t, ctrl.y2[0,1:], "--", label="desired", linewidth='2')
+    plt.ylabel("x")
+    #plt.ylim(-2,2)
+    plt.legend()
+    plt.title("CoM Position Tracking")
 
-# Plot torque profile
-plt.figure()
-plt.plot(ctrl.t, ctrl.tau[:,1:].T, linewidth='2')
-plt.ylabel("Joint Torques")
-plt.xlabel("time")
-plt.title("Torque Profile")
+    plt.subplot(3,1,2)
+    plt.plot(ctrl.t, ctrl.y1[1,1:], label="actual", linewidth='2')
+    plt.plot(ctrl.t, ctrl.y2[1,1:], "--", label="desired", linewidth='2')
+    plt.ylabel("y")
+    #plt.ylim(-2,2)
+
+    plt.subplot(3,1,3)
+    plt.plot(ctrl.t, ctrl.y1[2,1:], label="actual", linewidth='2')
+    plt.plot(ctrl.t, ctrl.y2[2,1:], "--", label="desired", linewidth='2')
+    plt.ylabel("z")
+    plt.xlabel("time")
+    #plt.ylim(-2,2)
 
 
-plt.show()
+    # Plot of simulation function vs error
+    plt.figure()
+    plt.subplot(2,1,1)
+    plt.plot(ctrl.t, ctrl.V, label="Simulation Function", linewidth='2')
+    plt.ylabel("Simulation Function")
+    plt.title("Simulation Fcn vs. Output Error")
+
+    plt.subplot(2,1,2)
+    plt.plot(ctrl.t, ctrl.err, label="Output Error", color='green', linewidth='2')
+    plt.ylabel("Output Error")
+    plt.xlabel("time")
+
+    # Plot torque profile
+    plt.figure()
+    plt.plot(ctrl.t, ctrl.tau[:,1:].T, linewidth='2')
+    plt.ylabel("Joint Torques")
+    plt.xlabel("time")
+    plt.title("Torque Profile")
+
+
+    plt.show()
 

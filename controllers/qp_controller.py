@@ -190,8 +190,8 @@ class ValkyrieQPController(ValkyriePDController):
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
 
-        Kp_com = 3e3   # Center of mass PD gains
-        Kd_com = 50.0
+        Kp_com = 1e4   # Center of mass PD gains
+        Kd_com = 1000.0
 
         Kp_h = 10.0    # Centroid momentum P gain
 
