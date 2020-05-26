@@ -21,13 +21,13 @@ push_seed = 0
 
 # Specify whether to add uneven terrain
 add_uneven_terrain = False
-terrain_seed = 0   # random seed used to generate uneven terrain
+terrain_seed = 1   # random seed used to generate uneven terrain
 
 # Specify control method: "AS" (our proposed approach) or "QP" (standard QP)
 control_method = "AS"
 
 # Specify total simulation time in seconds
-sim_time = 10.0
+sim_time = 10
 
 # Specify whether to make plots at the end
 make_plots = True
@@ -180,25 +180,28 @@ if make_plots:
 
     # Plot of y1 vs y2
     plt.figure()
-    plt.subplot(3,1,1)
-    plt.plot(ctrl.t, ctrl.y1[0,1:], label="actual", linewidth='2')
-    plt.plot(ctrl.t, ctrl.y2[0,1:], "--", label="desired", linewidth='2')
-    plt.ylabel("x")
-    #plt.ylim(-2,2)
-    plt.legend()
-    plt.title("CoM Position Tracking")
+    #plt.subplot(3,1,1)
+    #plt.plot(ctrl.t, ctrl.y1[0,1:], label="actual", linewidth='2')
+    #plt.plot(ctrl.t, ctrl.y2[0,1:], "--", label="desired", linewidth='2')
+    #plt.ylabel("x")
+    ##plt.ylim(-2,2)
+    #plt.legend()
+    #plt.title("CoM Position Tracking")
 
-    plt.subplot(3,1,2)
-    plt.plot(ctrl.t, ctrl.y1[1,1:], label="actual", linewidth='2')
-    plt.plot(ctrl.t, ctrl.y2[1,1:], "--", label="desired", linewidth='2')
-    plt.ylabel("y")
+    #plt.subplot(3,1,2)
+    #plt.plot(ctrl.t, ctrl.y1[1,1:], label="actual", linewidth='2')
+    #plt.plot(ctrl.t, ctrl.y2[1,1:], "--", label="desired", linewidth='2')
+    #plt.ylabel("y")
     #plt.ylim(-2,2)
 
-    plt.subplot(3,1,3)
-    plt.plot(ctrl.t, ctrl.y1[2,1:], label="actual", linewidth='2')
-    plt.plot(ctrl.t, ctrl.y2[2,1:], "--", label="desired", linewidth='2')
-    plt.ylabel("z")
-    plt.xlabel("time")
+    #plt.subplot(3,1,3)
+    plt.plot(ctrl.t, ctrl.y1[2,1:], label="Actual ($\mathbf{x}_1$)", linewidth='2')
+    plt.plot(ctrl.t, ctrl.y2[2,1:], "--", label="CoM Model ($\mathbf{x}_2$)", linewidth='2')
+    plt.hlines(ctrl.fsm.x_com_init[2],0,ctrl.t[-1],linestyles="dashdot",linewidth='2',label="LIP Model ($\mathbf{x}_3$)")
+    plt.ylim(0.92,1.07)
+    plt.ylabel("CoM Height (m)")
+    plt.xlabel("Time (s)")
+    plt.legend(loc=4)
     #plt.ylim(-2,2)
 
 

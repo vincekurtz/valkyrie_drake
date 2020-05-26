@@ -18,7 +18,7 @@ class ValkyrieASController(ValkyrieQPController):
         # Finite state machine defining desired ZMP trajectory,
         # foot placements, and swing foot trajectories.
         self.fsm = WalkingFSM(n_steps=8,
-                              step_length=0.50,
+                              step_length=0.70,
                               step_height=0.10,
                               step_time=1.0)
         #self.fsm = StandingFSM()
@@ -287,7 +287,7 @@ class ValkyrieASController(ValkyrieQPController):
         # Comput nominal input to abstract system (CoM velocity)
         x2_des, x2d_des, x2dd_des = self.fsm.ComTrajectory(context.get_time())
 
-        u2_nom = x2d_des - 1.0*(self.x2 - x2_des) 
+        u2_nom = x2d_des - 7.0*(self.x2 - x2_des) 
 
         tau, u2 = self.SolveWholeBodyQP(cache, context, q, qd, u2_nom)
 
