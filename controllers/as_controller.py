@@ -21,7 +21,7 @@ class ValkyrieASController(ValkyrieQPController):
                               step_length=0.70,
                               step_height=0.10,
                               step_time=1.0)
-        #self.fsm = StandingFSM()
+        self.fsm = StandingFSM()
 
         # Abstract Model Dynamics
         #
@@ -287,7 +287,7 @@ class ValkyrieASController(ValkyrieQPController):
         # Comput nominal input to abstract system (CoM velocity)
         x2_des, x2d_des, x2dd_des = self.fsm.ComTrajectory(context.get_time())
 
-        u2_nom = x2d_des - 7.0*(self.x2 - x2_des) 
+        u2_nom = x2d_des - 10.0*(self.x2 - x2_des) 
 
         tau, u2 = self.SolveWholeBodyQP(cache, context, q, qd, u2_nom)
 
@@ -312,7 +312,8 @@ class ValkyrieASController(ValkyrieQPController):
         M = self.tree.massMatrix(cache)
         J = self.tree.centerOfMassJacobian(cache)
         kappa = 1e4   # TODO: load all tuning params from separate file?
-        V = 0.5*np.dot(np.dot(qd.T,M),qd) + kappa*err
+        #V = 0.5*np.dot(np.dot(qd.T,M),qd) + kappa*err
+        V = (1./(2.*kappa))*np.dot(np.dot(qd.T,M),qd) + err
         self.V.append(V)
 
         self.tau = np.hstack([self.tau,tau.reshape(self.nu,1)])
