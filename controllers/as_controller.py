@@ -39,6 +39,7 @@ class ValkyrieASController(ValkyrieQPController):
         self.t = []                 # timesteps
         self.V = []                 # simulation function
         self.err = []               # output error
+        self.gamma = []             # K_inf function regulating when Vdot <= 0
         self.y1 = np.empty((3,1))   # concrete system output: true CoM position
         self.y2 = np.empty((3,1))   # abstract system output: desired CoM position
         self.tau = np.empty((self.nu,1))  # applied control torques
@@ -95,7 +96,7 @@ class ValkyrieASController(ValkyrieQPController):
         w4 = 50.0   # torso orientation weight
         w5 = 0.1    # centroidal momentum weight
 
-        kappa = 1e4      # Interface PD gains
+        kappa = 5e3      # Interface PD gains
         Kd_int = 1000
 
         nu_min = -1e-10   # slack for contact constraint
@@ -212,7 +213,7 @@ class ValkyrieASController(ValkyrieQPController):
         x_task = self.tree.centerOfMass(cache)[np.newaxis].T
         Jbar_com = J_com.T
         A_int = Kd_int*Jbar_com
-        b_int = tau_g - kappa*np.dot(J_com.T, x_task-self.x2) - Kd_int*qd.reshape(self.nv,1)
+        b_int = tau_g - 2*kappa*np.dot(J_com.T, x_task-self.x2) - Kd_int*qd.reshape(self.nv,1)
 
         #################### QP Formulation ##################
 
@@ -287,7 +288,7 @@ class ValkyrieASController(ValkyrieQPController):
         # Comput nominal input to abstract system (CoM velocity)
         x2_des, x2d_des, x2dd_des = self.fsm.ComTrajectory(context.get_time())
 
-        u2_nom = x2d_des - 10.0*(self.x2 - x2_des) 
+        u2_nom = x2d_des - 15.0*(self.x2 - x2_des) 
 
         tau, u2 = self.SolveWholeBodyQP(cache, context, q, qd, u2_nom)
 
@@ -311,9 +312,13 @@ class ValkyrieASController(ValkyrieQPController):
 
         M = self.tree.massMatrix(cache)
         J = self.tree.centerOfMassJacobian(cache)
-        kappa = 1e4   # TODO: load all tuning params from separate file?
+        kappa = 5e3   # TODO: load all tuning params from separate file?
         #V = 0.5*np.dot(np.dot(qd.T,M),qd) + kappa*err
         V = (1./(2.*kappa))*np.dot(np.dot(qd.T,M),qd) + err
         self.V.append(V)
+
+        gamma = (2*np.sqrt(err) + 1/(np.linalg.norm(u2))*err + 1/kappa*1000*np.linalg.norm(np.dot(J,qd)))*np.linalg.norm(u2)
+        #gamma = 0.5*np.linalg.norm(u2)
+        self.gamma.append(gamma)
 
         self.tau = np.hstack([self.tau,tau.reshape(self.nu,1)])

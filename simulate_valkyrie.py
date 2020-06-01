@@ -179,51 +179,61 @@ if make_plots:
     # make some plots of the results
 
     # Plot of y1 vs y2
-    plt.figure()
-    plt.subplot(3,1,1)
-    plt.plot(ctrl.t, ctrl.y1[0,1:], label="Actual ($\mathbf{y}_1$)", linewidth='2')
-    plt.plot(ctrl.t, ctrl.y2[0,1:], "--", label="CoM Model ($\mathbf{y}_2$)", linewidth='2')
-    plt.ylabel("CoM x position (m)")
-    #plt.ylim(-2,2)
-    plt.legend()
-    #plt.title("CoM Position Tracking")
+    #plt.figure()
+    #plt.subplot(3,1,1)
+    #plt.plot(ctrl.t, ctrl.y1[0,1:], label="Actual ($\mathbf{y}_1$)", linewidth='2')
+    #plt.plot(ctrl.t, ctrl.y2[0,1:], "--", label="CoM Model ($\mathbf{y}_2$)", linewidth='2')
+    #plt.ylabel("CoM x position (m)")
+    ##plt.ylim(-2,2)
+    #plt.legend()
+    ##plt.title("CoM Position Tracking")
 
-    plt.subplot(3,1,2)
-    plt.plot(ctrl.t, ctrl.y1[1,1:], label="Actual ($\mathbf{x}_1$)", linewidth='2')
-    plt.plot(ctrl.t, ctrl.y2[1,1:], "--", label="CoM Model ($\mathbf{x}_2$)", linewidth='2')
-    plt.ylabel("CoM y position (m)")
-    #plt.ylim(-2,2)
+    #plt.subplot(3,1,2)
+    #plt.plot(ctrl.t, ctrl.y1[1,1:], label="Actual ($\mathbf{x}_1$)", linewidth='2')
+    #plt.plot(ctrl.t, ctrl.y2[1,1:], "--", label="CoM Model ($\mathbf{x}_2$)", linewidth='2')
+    #plt.ylabel("CoM y position (m)")
+    ##plt.ylim(-2,2)
 
-    plt.subplot(3,1,3)
-    plt.plot(ctrl.t, ctrl.y1[2,1:], label="Actual ($\mathbf{x}_1$)", linewidth='2')
-    plt.plot(ctrl.t, ctrl.y2[2,1:], "--", label="CoM Model ($\mathbf{x}_2$)", linewidth='2')
-    #plt.hlines(ctrl.fsm.x_com_init[2],0,ctrl.t[-1],linestyles="dashdot",linewidth='2',label="LIP Model ($\mathbf{x}_3$)")
-    #plt.ylim(0.92,1.07)
-    plt.ylabel("CoM z position (m)")
-    plt.xlabel("Time (s)")
-    #plt.legend(loc=4)
-    #plt.ylim(-2,2)
+    #plt.subplot(3,1,3)
+    #plt.plot(ctrl.t, ctrl.y1[2,1:], label="Actual ($\mathbf{x}_1$)", linewidth='2')
+    #plt.plot(ctrl.t, ctrl.y2[2,1:], "--", label="CoM Model ($\mathbf{x}_2$)", linewidth='2')
+    ##plt.hlines(ctrl.fsm.x_com_init[2],0,ctrl.t[-1],linestyles="dashdot",linewidth='2',label="LIP Model ($\mathbf{x}_3$)")
+    ##plt.ylim(0.92,1.07)
+    #plt.ylabel("CoM z position (m)")
+    #plt.xlabel("Time (s)")
+    ##plt.legend(loc=4)
+    ##plt.ylim(-2,2)
 
 
     # Plot of simulation function vs error
     plt.figure()
-    #plt.subplot(2,1,1)
+    plt.subplot(2,1,1)
     plt.plot(ctrl.t, ctrl.V, label="Simulation Function", linewidth='2')
-    #plt.ylabel("Simulation Function")
-    #plt.title("Simulation Fcn vs. Output Error")
-
-    #plt.subplot(2,1,2)
+    #plt.ylabel("Simulation Function / Output Error")
     plt.plot(ctrl.t, ctrl.err, "--", label="Output Error", color='green', linewidth='2')
     plt.legend()
-    #plt.ylabel("Output Error")
+
+    plt.subplot(2,1,2)
+    #plt.plot(ctrl.t, np.asarray(ctrl.gamma)-np.asarray(ctrl.V), linewidth='2')
+    #plt.hlines(0,0,1)
+    plt.plot(ctrl.t, np.asarray(ctrl.V),linewidth='2', label="Simulation Function")
+    plt.plot(ctrl.t, np.asarray(ctrl.gamma), "--", color='red',linewidth='2', label="$\gamma_2(\|\mathbf{u}_2\|)$")
+    plt.yscale('log')
     plt.xlabel("Time (s)")
+    plt.legend()
 
     # Plot torque profile
-    plt.figure()
-    plt.plot(ctrl.t, ctrl.tau[:,1:].T, linewidth='2')
-    plt.ylabel("Joint Torques")
-    plt.xlabel("time")
-    plt.title("Torque Profile")
+    #plt.figure()
+    #plt.plot(ctrl.t, ctrl.tau[:,1:].T, linewidth='2')
+    #plt.ylabel("Joint Torques")
+    #plt.xlabel("time")
+    #plt.title("Torque Profile")
+
+    # Compute integral of torques squared
+    TT = 0
+    for i in range(ctrl.tau.shape[1]):
+        TT += np.dot(ctrl.tau[:,i].T,ctrl.tau[:,i])*dt
+    print("Integral of torques squared: %s" % TT)
 
 
     plt.show()
