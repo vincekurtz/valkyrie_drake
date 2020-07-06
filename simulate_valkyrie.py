@@ -206,27 +206,16 @@ if make_plots:
 
 
     # Plot of simulation function vs error
-    plt.figure()
-    plt.subplot(2,1,1)
     plt.plot(ctrl.t, ctrl.V, label="Simulation Function", linewidth='2')
     #plt.ylabel("Simulation Function / Output Error")
     plt.plot(ctrl.t, ctrl.err, "--", label="Output Error", color='green', linewidth='2')
-    plt.legend()
-
-    plt.subplot(2,1,2)
-    #plt.plot(ctrl.t, np.asarray(ctrl.gamma)-np.asarray(ctrl.V), linewidth='2')
-    #plt.hlines(0,0,1)
-    plt.plot(ctrl.t, np.asarray(ctrl.V),linewidth='2', label="Simulation Function")
-    plt.plot(ctrl.t, np.asarray(ctrl.gamma), "--", color='red',linewidth='2', label="$\gamma_2(\|\mathbf{u}_2\|)$")
-    plt.yscale('log')
-    plt.xlabel("Time (s)")
     plt.legend()
 
     # Plot torque profile
     #plt.figure()
     #plt.plot(ctrl.t, ctrl.tau[:,1:].T, linewidth='2')
     #plt.ylabel("Joint Torques")
-    #plt.xlabel("time")
+    plt.xlabel("Time (s)")
     #plt.title("Torque Profile")
 
     # Compute integral of torques squared
@@ -234,6 +223,10 @@ if make_plots:
     for i in range(ctrl.tau.shape[1]):
         TT += np.dot(ctrl.tau[:,i].T,ctrl.tau[:,i])*dt
     print("Integral of torques squared: %s" % TT)
+
+    # Compute approximate error bound
+    eps = np.asarray(ctrl.epsilon)[1:]
+    print("Approximate Error Bound: %s" % np.max(eps))
 
 
     plt.show()

@@ -39,7 +39,10 @@ class ValkyrieASController(ValkyrieQPController):
         self.t = []                 # timesteps
         self.V = []                 # simulation function
         self.err = []               # output error
-        self.gamma = []             # K_inf function regulating when Vdot <= 0
+
+        self.lastX = 0              # for numerically computing Xdot = (alpha*J'*Lambda)dot
+        self.epsilon = []           # error bound (estimate)
+
         self.y1 = np.empty((3,1))   # concrete system output: true CoM position
         self.y2 = np.empty((3,1))   # abstract system output: desired CoM position
         self.tau = np.empty((self.nu,1))  # applied control torques
@@ -311,14 +314,26 @@ class ValkyrieASController(ValkyrieQPController):
         self.err.append(err)
 
         M = self.tree.massMatrix(cache)
+        tau_g = self.tree.dynamicsBiasTerm(cache,{},False).reshape(self.np,1)
+        Cv = self.tree.dynamicsBiasTerm(cache,{},True).reshape(self.np,1) - tau_g
         J = self.tree.centerOfMassJacobian(cache)
         kappa = 5e3   # TODO: load all tuning params from separate file?
-        #V = 0.5*np.dot(np.dot(qd.T,M),qd) + kappa*err
-        V = (1./(2.*kappa))*np.dot(np.dot(qd.T,M),qd) + err
+        Kd = 1000
+
+        alpha = 1.5e-3
+        Minv = np.linalg.inv(M)
+        Lambda = np.linalg.inv( J.dot(Minv).dot(J.T) )
+        X = alpha*np.dot(J.T,Lambda)
+        Xd = (X-self.lastX)/self.dt
+        self.lastX = X
+
+        V = (1./(2.*kappa))*np.dot(np.dot(qd.T,M),qd) + err + qd.dot(X).dot(y1-y2)
         self.V.append(V)
 
-        gamma = (2*np.sqrt(err) + 1/(np.linalg.norm(u2))*err + 1/kappa*1000*np.linalg.norm(np.dot(J,qd)))*np.linalg.norm(u2)
-        #gamma = 0.5*np.linalg.norm(u2)
-        self.gamma.append(gamma)
+        z1 = (2+alpha)*u2.T + alpha*np.dot(qd,Xd) - alpha*Kd*qd.T.dot(Minv).dot(J.T).dot(Lambda) - alpha*Cv.T.dot(Minv).dot(J.T).dot(Lambda)
+        z2 = 1/kappa*Kd*qd.T.dot(J.T) - alpha*qd.T.dot(J.T).dot(Lambda)
+
+        epsilon = (np.linalg.norm(z1) + np.sqrt(np.linalg.norm(z1)**2 + 8*alpha*kappa*np.linalg.norm(z2)*np.linalg.norm(u2)))/(4*kappa*alpha)
+        self.epsilon.append(epsilon)
 
         self.tau = np.hstack([self.tau,tau.reshape(self.nu,1)])

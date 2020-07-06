@@ -77,7 +77,7 @@ class WalkingFSM(object):
         self.total_time = self.step_time*self.n_phases  
 
         # initial CoM and foot positions
-        self.x_com_init = np.asarray([[0.0], [0.0], [1.00]])
+        self.x_com_init = np.asarray([[0.0], [0.0], [1.04]])
         self.xd_com_init = np.asarray([[0.0], [0.0], [0.0]])
 
         self.fc_offset = -0.065   # The foot frame is this far from the foot's center
