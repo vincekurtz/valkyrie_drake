@@ -275,7 +275,10 @@ class ValkyrieASController(ValkyrieQPController):
         friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
 
         # Solve the QP
-        result = Solve(self.mp)
+        Solver = OsqpSolver()
+        #result = Solve(self.mp)
+        result = Solver.Solve(self.mp,None,None)
+        print(result.get_solver_details().solve_time)
 
         assert result.is_success(), "Whole-body QP Failed"
 

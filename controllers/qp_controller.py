@@ -5,6 +5,7 @@
 ##
 
 from pd_controller import *
+import time
 
 class ValkyrieQPController(ValkyriePDController):
     def __init__(self, tree, plant, estimation_noise):
@@ -346,7 +347,10 @@ class ValkyrieQPController(ValkyriePDController):
         friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
 
         # Solve the QP
-        result = Solve(self.mp)
+        Solver = OsqpSolver()
+        #result = Solve(self.mp)
+        result = Solver.Solve(self.mp,None,None)
+        print(result.get_solver_details().solve_time)
 
         assert result.is_success()
 
@@ -361,14 +365,13 @@ class ValkyrieQPController(ValkyriePDController):
         q, qd = self.StateToQQDot(state)
         
         # Add state estimation noise for floating base
-        #if self.estimation_noise is not None:
-        #    print("hello")
-        #    sigma_p = self.estimation_noise(0)
-        #    sigma_r = self.estimation_noise(1)
-        #    sigma_v = self.estimation_noise(2)
-        #    q[0:3] += np.random.normal(0,sigma_p,size=(3,))
-        #    q[4:7] += np.random.normal(0,sigma_r,size=(3,))
-        #    qd[0:3] += np.random.normal(0,sigma_v,size=(3,))
+        if self.estimation_noise is not None:
+            sigma_p = self.estimation_noise[0]
+            sigma_r = self.estimation_noise[1]
+            sigma_v = self.estimation_noise[2]
+            q[0:3] += np.random.normal(0,sigma_p,size=(3,))
+            q[4:7] += np.random.normal(0,sigma_r,size=(3,))
+            qd[0:3] += np.random.normal(0,sigma_v,size=(3,))
 
         # Run kinematics, which will allow us to calculate key quantities
         cache = self.tree.doKinematics(q, qd)
