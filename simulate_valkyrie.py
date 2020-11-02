@@ -21,13 +21,13 @@ push_seed = 0
 
 # Specify whether to add uneven terrain
 add_uneven_terrain = False
-terrain_seed = 1   # random seed used to generate uneven terrain
+terrain_seed = 0   # random seed used to generate uneven terrain
 
 # Specify control method: "AS" (our proposed approach) or "QP" (standard QP)
 control_method = "AS"
 
 # Specify total simulation time in seconds
-sim_time = 1.0
+sim_time = 10.0
 
 # Specify whether to make plots at the end
 make_plots = True
@@ -59,8 +59,8 @@ tree = RigidBodyTree(tree_robot_urdf, FloatingBaseType.kRollPitchYaw)
 # Add a flat ground with friction
 X_BG = RigidTransform()
 surface_friction = CoulombFriction(
-        static_friction = 0.7,
-        dynamic_friction = 0.1)
+        static_friction = 1.0,
+        dynamic_friction = 1.0)
 plant.RegisterCollisionGeometry(
         plant.world_body(),      # the body for which this object is registered
         X_BG,                    # The fixed pose of the geometry frame G in the body frame B

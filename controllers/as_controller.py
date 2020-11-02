@@ -21,7 +21,7 @@ class ValkyrieASController(ValkyrieQPController):
                               step_length=0.70,
                               step_height=0.10,
                               step_time=1.0)
-        self.fsm = StandingFSM()
+        #self.fsm = StandingFSM()
 
         # Abstract Model Dynamics
         #
@@ -102,8 +102,10 @@ class ValkyrieASController(ValkyrieQPController):
         kappa = 5e3      # Interface PD gains
         Kd_int = 1000
 
-        nu_min = -1e-10   # slack for contact constraint
-        nu_max = 1e-10
+        #nu_min = -1e-10   # slack for contact constraint
+        #nu_max = 1e-10
+        nu_min = 0
+        nu_max = 0
 
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
