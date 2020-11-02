@@ -24,16 +24,16 @@ add_uneven_terrain = False
 terrain_seed = 0   # random seed used to generate uneven terrain
 
 # Specify control method: "AS" (our proposed approach) or "QP" (standard QP)
-control_method = "AS"
+control_method = "QP"
 
 # Specify total simulation time in seconds
 sim_time = 10.0
 
 # Specify whether to make plots at the end
-make_plots = True
+make_plots = False
 
 # Specify whether to include state estimation noise on floating base
-use_estimation_noise = False
+use_estimation_noise = True
 sigma_p = 3.0      # position error std deviation in mm
 sigma_r = 0.5      # rotation error std deviation in degrees
 sigma_v = 14.2     # velocity error std deviation in mm/s
@@ -65,8 +65,8 @@ tree = RigidBodyTree(tree_robot_urdf, FloatingBaseType.kRollPitchYaw)
 # Add a flat ground with friction
 X_BG = RigidTransform()
 surface_friction = CoulombFriction(
-        static_friction = 1.0,
-        dynamic_friction = 1.0)
+        static_friction = 0.7,
+        dynamic_friction = 0.1)
 plant.RegisterCollisionGeometry(
         plant.world_body(),      # the body for which this object is registered
         X_BG,                    # The fixed pose of the geometry frame G in the body frame B
@@ -79,6 +79,9 @@ plant.RegisterVisualGeometry(
         HalfSpace(),
         "ground_visual",
         np.array([0.5,0.5,0.5,0.0]))    # Color set to be completely transparent
+
+#plant.set_penetration_allowance(0.001)
+#plant.set_stiction_tolerance(0.001)
 
 if add_uneven_terrain:
 # Add uneven terrain to the world, by placing a bunch of block randomly
