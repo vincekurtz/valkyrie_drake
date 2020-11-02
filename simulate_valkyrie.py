@@ -24,7 +24,7 @@ add_uneven_terrain = False
 terrain_seed = 0   # random seed used to generate uneven terrain
 
 # Specify control method: "AS" (our proposed approach) or "QP" (standard QP)
-control_method = "QP"
+control_method = "AS"
 
 # Specify total simulation time in seconds
 sim_time = 10.0
@@ -51,7 +51,7 @@ else:
 robot_urdf = FindResourceOrThrow(true_robot_description_file)
 builder = DiagramBuilder()
 scene_graph = builder.AddSystem(SceneGraph())
-dt = 1e-3
+dt = 5e-3
 plant = builder.AddSystem(MultibodyPlant(time_step=dt))
 plant.RegisterAsSourceForSceneGraph(scene_graph)
 Parser(plant=plant).AddModelFromFile(robot_urdf)
