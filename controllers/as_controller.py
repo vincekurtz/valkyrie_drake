@@ -9,8 +9,8 @@ import itertools
 from qp_controller import *
 
 class ValkyrieASController(ValkyrieQPController):
-    def __init__(self, tree, plant, dt):
-        ValkyrieQPController.__init__(self, tree, plant)
+    def __init__(self, tree, plant, dt, estimation_noise):
+        ValkyrieQPController.__init__(self, tree, plant, estimation_noise)
 
         # Timestepping parameter for MPC and simulating the LIPM.
         self.dt = dt
@@ -286,6 +286,15 @@ class ValkyrieASController(ValkyrieQPController):
         Map from the state (q,qd) to output torques.
         """
         q, qd = self.StateToQQDot(state)
+
+        # Add state estimation noise for floating base
+        if self.estimation_noise is not None:
+            sigma_p = self.estimation_noise[0]
+            sigma_r = self.estimation_noise[1]
+            sigma_v = self.estimation_noise[2]
+            q[0:3] += np.random.normal(0,sigma_p,size=(3,))
+            q[4:7] += np.random.normal(0,sigma_r,size=(3,))
+            qd[0:3] += np.random.normal(0,sigma_v,size=(3,))
 
         # Compute kinimatics, which will allow us to calculate key quantities
         cache = self.tree.doKinematics(q,qd)

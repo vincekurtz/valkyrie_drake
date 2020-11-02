@@ -30,7 +30,13 @@ control_method = "AS"
 sim_time = 10.0
 
 # Specify whether to make plots at the end
-make_plots = True
+make_plots = False
+
+# Specify whether to include state estimation noise on floating base
+use_estimation_noise = True
+sigma_p = 3.0      # position error std deviation in mm
+sigma_r = 0.5      # rotation error std deviation in degrees
+sigma_v = 14.2     # velocity error std deviation in mm/s
 
 ######################################################################
 
@@ -135,11 +141,19 @@ builder.Connect(
         plant.get_geometry_poses_output_port(),
         scene_graph.get_source_pose_port(plant.get_source_id()))
 
+# Set up state estimation noise
+if use_estimation_noise:
+    estimation_noise = (sigma_p/1000,       # convert mm to m
+                        sigma_r*np.pi/180,  # convert degrees to radians
+                        sigma_v/1000)       # convert mm/s to m/s
+else:
+    estimation_noise = None
+
 # Set up a controller
 if control_method == "AS":
-    ctrl = ValkyrieASController(tree,plant,dt)
+    ctrl = ValkyrieASController(tree,plant,dt,estimation_noise)
 elif control_method == "QP":
-    ctrl = ValkyrieQPController(tree,plant)
+    ctrl = ValkyrieQPController(tree,plant,estimation_noise)
 else:
     raise(ValueError("invalid control method %s" % control_method))
 
