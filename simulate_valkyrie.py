@@ -24,7 +24,7 @@ add_uneven_terrain = False
 terrain_seed = 0   # random seed used to generate uneven terrain
 
 # Specify control method: "AS" (our proposed approach) or "QP" (standard QP)
-control_method = "QP"
+control_method = "AS"
 
 # Specify total simulation time in seconds
 sim_time = 10.0
@@ -33,7 +33,7 @@ sim_time = 10.0
 make_plots = False
 
 # Specify whether to include state estimation noise on floating base
-use_estimation_noise = True
+use_estimation_noise = False
 sigma_p = 3.0      # position error std deviation in mm
 sigma_r = 0.5      # rotation error std deviation in degrees
 sigma_v = 14.2     # velocity error std deviation in mm/s
@@ -51,7 +51,7 @@ else:
 robot_urdf = FindResourceOrThrow(true_robot_description_file)
 builder = DiagramBuilder()
 scene_graph = builder.AddSystem(SceneGraph())
-dt = 5e-3
+dt = 3e-3
 plant = builder.AddSystem(MultibodyPlant(time_step=dt))
 plant.RegisterAsSourceForSceneGraph(scene_graph)
 Parser(plant=plant).AddModelFromFile(robot_urdf)
@@ -65,7 +65,7 @@ tree = RigidBodyTree(tree_robot_urdf, FloatingBaseType.kRollPitchYaw)
 # Add a flat ground with friction
 X_BG = RigidTransform()
 surface_friction = CoulombFriction(
-        static_friction = 0.7,
+        static_friction = 1.0,
         dynamic_friction = 0.1)
 plant.RegisterCollisionGeometry(
         plant.world_body(),      # the body for which this object is registered
@@ -80,7 +80,6 @@ plant.RegisterVisualGeometry(
         "ground_visual",
         np.array([0.5,0.5,0.5,0.0]))    # Color set to be completely transparent
 
-#plant.set_penetration_allowance(0.001)
 #plant.set_stiction_tolerance(0.001)
 
 if add_uneven_terrain:
@@ -118,6 +117,7 @@ if add_uneven_terrain:
 
 
 plant.Finalize()
+plant.set_penetration_allowance(0.003)
 assert plant.geometry_source_is_registered()
 
 if add_random_push:

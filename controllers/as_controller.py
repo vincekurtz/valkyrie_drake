@@ -110,7 +110,7 @@ class ValkyrieASController(ValkyrieQPController):
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
 
-        Kp_foot = 500.0   # foot position PD gains
+        Kp_foot = 100.0   # foot position PD gains
         Kd_foot = 50.0 
 
         Kp_torso = 500.0   # torso orientation PD gains
@@ -118,7 +118,7 @@ class ValkyrieASController(ValkyrieQPController):
 
         Kp_k = 10.0    # angular momentum P gain
 
-        Kd_contact = 10.0  # Contact movement damping P gain
+        Kd_contact = 1.0  # Contact movement damping P gain
 
         ##################################################
         
@@ -275,7 +275,9 @@ class ValkyrieASController(ValkyrieQPController):
         friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
 
         # Solve the QP
-        result = Solve(self.mp)
+        #result = Solve(self.mp)
+        solver = GurobiSolver()
+        result = solver.Solve(self.mp, None, None)
 
         assert result.is_success(), "Whole-body QP Failed"
 

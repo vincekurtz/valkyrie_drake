@@ -347,7 +347,9 @@ class ValkyrieQPController(ValkyriePDController):
         friction_constraint = self.AddFrictionPyramidConstraint(f_contact)
 
         # Solve the QP
-        result = Solve(self.mp)
+        #result = Solve(self.mp)
+        solver = GurobiSolver()
+        result = solver.Solve(self.mp, None, None)
 
         assert result.is_success()
 
