@@ -6,6 +6,7 @@ from utils.disturbance_system import DisturbanceSystem
 from controllers import ValkyriePDController, ValkyrieQPController, ValkyrieASController
 import numpy as np
 import matplotlib.pyplot as plt
+import sys
 
 ######################################################################
 # Simulation Parameters
@@ -17,26 +18,26 @@ model_num = 0    # incorrect model in [0,10] to use if use_incorrect_model is Tr
 
 # Specify whether to add a random lateral push
 add_random_push = False
-push_seed = 0
+push_seed = None
 
 # Specify whether to add uneven terrain
-add_uneven_terrain = False
-terrain_seed = 0   # random seed used to generate uneven terrain
+add_uneven_terrain = True
+terrain_seed = None   # random seed used to generate uneven terrain
 
 # Specify control method: "AS" (our proposed approach) or "QP" (standard QP)
 control_method = "AS"
 
 # Specify total simulation time in seconds
-sim_time = 10.0
+sim_time = 11.0
 
 # Specify whether to make plots at the end
 make_plots = False
 
 # Specify whether to include state estimation noise on floating base
 use_estimation_noise = False
-sigma_p = 3.0      # position error std deviation in mm
+sigma_p = 5.7      # position error std deviation in mm
 sigma_r = 0.5      # rotation error std deviation in degrees
-sigma_v = 14.2     # velocity error std deviation in mm/s
+sigma_v = 18.5     # velocity error std deviation in mm/s
 
 ######################################################################
 
@@ -51,7 +52,7 @@ else:
 robot_urdf = FindResourceOrThrow(true_robot_description_file)
 builder = DiagramBuilder()
 scene_graph = builder.AddSystem(SceneGraph())
-dt = 3e-3
+dt = 5e-3
 plant = builder.AddSystem(MultibodyPlant(time_step=dt))
 plant.RegisterAsSourceForSceneGraph(scene_graph)
 Parser(plant=plant).AddModelFromFile(robot_urdf)
@@ -117,7 +118,7 @@ if add_uneven_terrain:
 
 
 plant.Finalize()
-plant.set_penetration_allowance(0.003)
+plant.set_penetration_allowance(0.002)
 assert plant.geometry_source_is_registered()
 
 if add_random_push:
@@ -126,7 +127,7 @@ if add_random_push:
     time = np.random.uniform(low=1.0,high=3.5)
     magnitude = np.random.uniform(low=400,high=600)
     direction = np.random.choice([-1,1])
-    
+
     disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
                                                           "torso",                     # body to apply to
                                                           np.asarray([0,0,0,0,direction*magnitude,0]),  # wrench to apply
@@ -189,7 +190,10 @@ state.SetFromVector(initial_state_vec)
 
 # Run the simulation
 simulator.Initialize()
-simulator.AdvanceTo(sim_time)
+try:
+    simulator.AdvanceTo(sim_time)
+except:
+    sys.exit(1)
 
 
 if make_plots:
@@ -223,27 +227,35 @@ if make_plots:
 
 
     # Plot of simulation function vs error
-    plt.plot(ctrl.t, ctrl.V, label="Simulation Function", linewidth='2')
+    #plt.plot(ctrl.t, ctrl.V, label="Simulation Function", linewidth='2')
     #plt.ylabel("Simulation Function / Output Error")
-    plt.plot(ctrl.t, ctrl.err, "--", label="Output Error", color='green', linewidth='2')
-    plt.legend()
+    #plt.plot(ctrl.t, ctrl.err, "--", label="Output Error", color='green', linewidth='2')
+    #plt.legend()
 
     # Plot torque profile
-    #plt.figure()
-    #plt.plot(ctrl.t, ctrl.tau[:,1:].T, linewidth='2')
-    #plt.ylabel("Joint Torques")
+    plt.figure()
+    plt.plot(ctrl.t, ctrl.tau[:,1:].T, linewidth='2')
+    plt.ylabel("Joint Torques")
     plt.xlabel("Time (s)")
     #plt.title("Torque Profile")
 
-    # Compute integral of torques squared
-    TT = 0
+    tau_squared = []
     for i in range(ctrl.tau.shape[1]):
-        TT += np.dot(ctrl.tau[:,i].T,ctrl.tau[:,i])*dt
-    print("Integral of torques squared: %s" % TT)
+        tau_squared.append(np.dot(ctrl.tau[:,i].T,ctrl.tau[:,i]))
+
+    plt.figure()
+    plt.plot(ctrl.t,tau_squared[1:],linewidth='2')
+
+    # Compute integral of torques squared
+    #TT = 0
+    #for i in range(ctrl.tau.shape[1]):
+    #    TT += np.dot(ctrl.tau[:,i].T,ctrl.tau[:,i])*dt
+    #print("Integral of torques squared: %s" % TT)
 
     # Compute approximate error bound
-    eps = np.asarray(ctrl.epsilon)[1:]
-    print("Approximate Error Bound: %s" % np.max(eps))
+    #eps = np.asarray(ctrl.epsilon)[1:]
+    #print("Approximate Error Bound: %s" % np.max(eps))
+
 
 
     plt.show()

@@ -110,7 +110,7 @@ class ValkyrieASController(ValkyrieQPController):
         Kp_q = 100     # Joint angle PD gains
         Kd_q = 10
 
-        Kp_foot = 100.0   # foot position PD gains
+        Kp_foot = 500.0   # foot position PD gains
         Kd_foot = 50.0 
 
         Kp_torso = 500.0   # torso orientation PD gains
@@ -118,7 +118,7 @@ class ValkyrieASController(ValkyrieQPController):
 
         Kp_k = 10.0    # angular momentum P gain
 
-        Kd_contact = 1.0  # Contact movement damping P gain
+        Kd_contact = 10.0  # Contact movement damping P gain
 
         ##################################################
         
@@ -251,6 +251,11 @@ class ValkyrieASController(ValkyrieQPController):
 
         # angular momentum cost
         angular_cost = self.AddJacobianTypeCost(J_k, qdd, Jd_qd_k, kd_com_des, weight=w5)
+
+        # applied torque cost
+        #torque_cost = self.mp.AddQuadraticErrorCost(Q=1e-5*np.eye(self.nu),
+        #                                            x_desired=self.tau[:,-1],
+        #                                            vars=tau)
             
         # Contact acceleration constraint
         for j in range(num_contacts):
