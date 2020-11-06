@@ -13,11 +13,11 @@ import sys
 ######################################################################
 
 # Specify whether the controller should assume an incorrect model
-use_incorrect_model = True
-model_num = sys.argv[1]    # incorrect model in [0,10] to use if use_incorrect_model is True
+use_incorrect_model = False
+model_num = 0    # incorrect model in [0,10] to use if use_incorrect_model is True
 
 # Specify whether to add a random lateral push
-add_random_push = False
+add_random_push = True
 push_seed = None
 
 # Specify whether to add uneven terrain
@@ -25,19 +25,19 @@ add_uneven_terrain = False
 terrain_seed = None   # random seed used to generate uneven terrain
 
 # Specify control method: "AS" (our proposed approach) or "QP" (standard QP)
-control_method = "QP"
+control_method = "AS"
 
 # Specify total simulation time in seconds
-sim_time = 5.0
+sim_time = 3.5
 
 # Specify whether to make plots at the end
-make_plots = False
+make_plots = True
 
 # Specify whether to include state estimation noise on floating base
 use_estimation_noise = False
-sigma_p = 5.7      # position error std deviation in mm
-sigma_r = 0.5      # rotation error std deviation in degrees
-sigma_v = 18.5     # velocity error std deviation in mm/s
+sigma_p = 50.0      # position error std deviation in mm
+sigma_r = 1.5      # rotation error std deviation in degrees
+sigma_v = 250     # velocity error std deviation in mm/s
 
 ######################################################################
 
@@ -123,10 +123,14 @@ assert plant.geometry_source_is_registered()
 
 if add_random_push:
     # Set up an external force
-    np.random.seed(push_seed)
-    time = np.random.uniform(low=1.0,high=3.5)
-    magnitude = np.random.uniform(low=400,high=600)
-    direction = np.random.choice([-1,1])
+    #np.random.seed(push_seed)
+    #time = np.random.uniform(low=1.0,high=3.5)
+    #magnitude = np.random.uniform(low=400,high=600)
+    #direction = np.random.choice([-1,1])
+
+    time = 2
+    magnitude = 800
+    direction = -1
 
     disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
                                                           "torso",                     # body to apply to
@@ -193,7 +197,8 @@ simulator.Initialize()
 try:
     simulator.AdvanceTo(sim_time)
 except:
-    sys.exit(1)
+    print("Controller Error!")
+    #sys.exit(1)
 
 
 if make_plots:
@@ -227,24 +232,48 @@ if make_plots:
 
 
     # Plot of simulation function vs error
-    #plt.plot(ctrl.t, ctrl.V, label="Simulation Function", linewidth='2')
-    #plt.ylabel("Simulation Function / Output Error")
+    plt.figure()
+    plt.subplot(3,1,1)
+    plt.plot(ctrl.t, ctrl.V, label="Storage Function", linewidth='2')
+    plt.ylabel("$V(\mathbf{x}_1,\mathbf{x}_2)$")
+    plt.vlines(2.0,0,1,color="grey",linewidth="2",linestyle="--")
+    plt.ylim(0,0.008)
+    plt.xlim(1,3.5)
+    plt.xticks([])
     #plt.plot(ctrl.t, ctrl.err, "--", label="Output Error", color='green', linewidth='2')
     #plt.legend()
 
     # Plot torque profile
-    plt.figure()
-    plt.plot(ctrl.t, ctrl.tau[:,1:].T, linewidth='2')
-    plt.ylabel("Joint Torques")
-    plt.xlabel("Time (s)")
+    #plt.figure()
+    #plt.plot(ctrl.t, ctrl.tau[:,1:].T, linewidth='2')
+    #plt.ylabel("Joint Torques")
+    #plt.xlabel("Time (s)")
+    #plt.ylim(-500,500)
     #plt.title("Torque Profile")
 
+    # plot squared joint torques
+    plt.subplot(3,1,2)
     tau_squared = []
     for i in range(ctrl.tau.shape[1]):
         tau_squared.append(np.dot(ctrl.tau[:,i].T,ctrl.tau[:,i]))
 
-    plt.figure()
-    plt.plot(ctrl.t,tau_squared[1:],linewidth='2')
+    plt.plot(ctrl.t,tau_squared[1:],linewidth='2',color='green')
+    plt.ylabel('$\\tau^T\\tau$')
+    plt.ylim(-1e4,5e5)
+    plt.vlines(2.0,-10e5,10e5,color="grey",linewidth="2",linestyle="--")
+    plt.xlim(1,3.5)
+    plt.gca().ticklabel_format(style='sci',scilimits=(0,0))
+    plt.xticks([])
+    
+    # Plot right foot position
+    plt.subplot(3,1,3)
+    plt.plot(ctrl.t, ctrl.right_foot[1,1:].T, linewidth='2', color='red')
+    plt.ylabel('foot position')
+    plt.vlines(2.0,-10,10,color="grey",linewidth="2",linestyle="--")
+    plt.ylim(-0.5,0.5)
+    plt.xlim(1,3.5)
+    plt.xlabel('Time (s)')
+
 
     # Compute integral of torques squared
     #TT = 0

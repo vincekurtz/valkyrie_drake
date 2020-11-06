@@ -21,7 +21,7 @@ class ValkyrieASController(ValkyrieQPController):
                               step_length=0.70,
                               step_height=0.10,
                               step_time=1.0)
-        #self.fsm = StandingFSM()
+        self.fsm = StandingFSM()
 
         # Abstract Model Dynamics
         #
@@ -42,10 +42,12 @@ class ValkyrieASController(ValkyrieQPController):
 
         self.lastX = 0              # for numerically computing Xdot = (alpha*J'*Lambda)dot
         self.epsilon = []           # error bound (estimate)
-
+        
         self.y1 = np.empty((3,1))   # concrete system output: true CoM position
         self.y2 = np.empty((3,1))   # abstract system output: desired CoM position
         self.tau = np.empty((self.nu,1))  # applied control torques
+        
+        self.right_foot = np.empty((3,1))        # position of the right foot
 
     def AddInterfaceConstraint(self, S, contact_jacobians, contact_forces, N, A_int, b_int, u2, tau, tau0):
         """
@@ -355,3 +357,6 @@ class ValkyrieASController(ValkyrieQPController):
         self.epsilon.append(epsilon)
 
         self.tau = np.hstack([self.tau,tau.reshape(self.nu,1)])
+
+        p_right = self.tree.transformPoints(cache, [0,0,0], self.right_foot_index, self.world_index)
+        self.right_foot = np.hstack([self.right_foot, p_right])
