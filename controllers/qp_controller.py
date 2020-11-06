@@ -15,7 +15,7 @@ class ValkyrieQPController(ValkyriePDController):
                               step_length=0.50,   # swing foot trajectories, and stance phases.
                               step_height=0.10,
                               step_time=1.0)
-        self.fsm = StandingFSM()
+        #self.fsm = StandingFSM()
 
         self.mu = 0.1             # assumed friction coefficient
 
@@ -38,9 +38,9 @@ class ValkyrieQPController(ValkyriePDController):
         self.tau = np.empty((self.nu,1))  # applied control torques
 
         # For simulation function comparison w/ AS approach
-        self.lastX=0
-        self.dt = 5e-3
-        self.right_foot = np.empty((3,1))
+        #self.lastX=0
+        #self.dt = 5e-3
+        #self.right_foot = np.empty((3,1))
 
     def get_foot_contact_points(self):
         """
@@ -397,20 +397,20 @@ class ValkyrieQPController(ValkyriePDController):
         err = np.dot((y1-y2).T,(y1-y2))[0,0]
         self.err.append(err)
 
-        M = self.tree.massMatrix(cache)
-        J = self.tree.centerOfMassJacobian(cache)
-        kappa = 5e3
-        alpha = 1.5e-3
-        Minv = np.linalg.inv(M)
-        Lambda = np.linalg.inv( J.dot(Minv).dot(J.T) )
-        X = alpha*np.dot(J.T,Lambda)
-        Xd = (X-self.lastX)/self.dt
-        self.lastX = X
-        V = (1./(2.*kappa))*np.dot(np.dot(qd.T,M),qd) + err + qd.dot(X).dot(y1-y2)
-        self.V.append(V)     # placeholder for simulation function
+        #M = self.tree.massMatrix(cache)
+        #J = self.tree.centerOfMassJacobian(cache)
+        #kappa = 5e3
+        #alpha = 1.5e-3
+        #Minv = np.linalg.inv(M)
+        #Lambda = np.linalg.inv( J.dot(Minv).dot(J.T) )
+        #X = alpha*np.dot(J.T,Lambda)
+        #Xd = (X-self.lastX)/self.dt
+        #self.lastX = X
+        #V = (1./(2.*kappa))*np.dot(np.dot(qd.T,M),qd) + err + qd.dot(X).dot(y1-y2)
+        #self.V.append(V)     # placeholder for simulation function
 
-        self.tau = np.hstack([self.tau,u.reshape(self.nu,1)])
+        #self.tau = np.hstack([self.tau,u.reshape(self.nu,1)])
 
-        p_right = self.tree.transformPoints(cache, [0,0,0], self.right_foot_index, self.world_index)
-        self.right_foot = np.hstack([self.right_foot, p_right])
+        #p_right = self.tree.transformPoints(cache, [0,0,0], self.right_foot_index, self.world_index)
+        #self.right_foot = np.hstack([self.right_foot, p_right])
 

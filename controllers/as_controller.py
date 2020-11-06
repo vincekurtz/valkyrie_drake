@@ -21,7 +21,7 @@ class ValkyrieASController(ValkyrieQPController):
                               step_length=0.70,
                               step_height=0.10,
                               step_time=1.0)
-        self.fsm = StandingFSM()
+        #self.fsm = StandingFSM()
 
         # Abstract Model Dynamics
         #
@@ -333,30 +333,30 @@ class ValkyrieASController(ValkyrieQPController):
         err = np.dot((y1-y2).T,(y1-y2))[0,0]
         self.err.append(err)
 
-        M = self.tree.massMatrix(cache)
-        tau_g = self.tree.dynamicsBiasTerm(cache,{},False).reshape(self.np,1)
-        Cv = self.tree.dynamicsBiasTerm(cache,{},True).reshape(self.np,1) - tau_g
-        J = self.tree.centerOfMassJacobian(cache)
-        kappa = 5e3   # TODO: load all tuning params from separate file?
-        Kd = 1000
+        #M = self.tree.massMatrix(cache)
+        #tau_g = self.tree.dynamicsBiasTerm(cache,{},False).reshape(self.np,1)
+        #Cv = self.tree.dynamicsBiasTerm(cache,{},True).reshape(self.np,1) - tau_g
+        #J = self.tree.centerOfMassJacobian(cache)
+        #kappa = 5e3   # TODO: load all tuning params from separate file?
+        #Kd = 1000
 
-        alpha = 1.5e-3
-        Minv = np.linalg.inv(M)
-        Lambda = np.linalg.inv( J.dot(Minv).dot(J.T) )
-        X = alpha*np.dot(J.T,Lambda)
-        Xd = (X-self.lastX)/self.dt
-        self.lastX = X
+        #alpha = 1.5e-3
+        #Minv = np.linalg.inv(M)
+        #Lambda = np.linalg.inv( J.dot(Minv).dot(J.T) )
+        #X = alpha*np.dot(J.T,Lambda)
+        #Xd = (X-self.lastX)/self.dt
+        #self.lastX = X
 
-        V = (1./(2.*kappa))*np.dot(np.dot(qd.T,M),qd) + err + qd.dot(X).dot(y1-y2)
-        self.V.append(V)
+        #V = (1./(2.*kappa))*np.dot(np.dot(qd.T,M),qd) + err + qd.dot(X).dot(y1-y2)
+        #self.V.append(V)
 
-        z1 = (2+alpha)*u2.T + alpha*np.dot(qd,Xd) - alpha*Kd*qd.T.dot(Minv).dot(J.T).dot(Lambda) - alpha*Cv.T.dot(Minv).dot(J.T).dot(Lambda)
-        z2 = 1/kappa*Kd*qd.T.dot(J.T) - alpha*qd.T.dot(J.T).dot(Lambda)
+        #z1 = (2+alpha)*u2.T + alpha*np.dot(qd,Xd) - alpha*Kd*qd.T.dot(Minv).dot(J.T).dot(Lambda) - alpha*Cv.T.dot(Minv).dot(J.T).dot(Lambda)
+        #z2 = 1/kappa*Kd*qd.T.dot(J.T) - alpha*qd.T.dot(J.T).dot(Lambda)
 
-        epsilon = (np.linalg.norm(z1) + np.sqrt(np.linalg.norm(z1)**2 + 8*alpha*kappa*np.linalg.norm(z2)*np.linalg.norm(u2)))/(4*kappa*alpha)
-        self.epsilon.append(epsilon)
+        #epsilon = (np.linalg.norm(z1) + np.sqrt(np.linalg.norm(z1)**2 + 8*alpha*kappa*np.linalg.norm(z2)*np.linalg.norm(u2)))/(4*kappa*alpha)
+        #self.epsilon.append(epsilon)
 
-        self.tau = np.hstack([self.tau,tau.reshape(self.nu,1)])
+        #self.tau = np.hstack([self.tau,tau.reshape(self.nu,1)])
 
-        p_right = self.tree.transformPoints(cache, [0,0,0], self.right_foot_index, self.world_index)
-        self.right_foot = np.hstack([self.right_foot, p_right])
+        #p_right = self.tree.transformPoints(cache, [0,0,0], self.right_foot_index, self.world_index)
+        #self.right_foot = np.hstack([self.right_foot, p_right])

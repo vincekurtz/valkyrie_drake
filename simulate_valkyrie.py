@@ -14,24 +14,24 @@ import sys
 
 # Specify whether the controller should assume an incorrect model
 use_incorrect_model = False
-model_num = 0    # incorrect model in [0,10] to use if use_incorrect_model is True
+model_num = sys.argv[1]    # incorrect model in [1,100] to use if use_incorrect_model is True
 
 # Specify whether to add a random lateral push
-add_random_push = True
-push_seed = None
+add_random_push = False
+push_seed = sys.argv[1]
 
 # Specify whether to add uneven terrain
 add_uneven_terrain = False
-terrain_seed = None   # random seed used to generate uneven terrain
+terrain_seed = sys.argv[1]   # random seed used to generate uneven terrain
 
 # Specify control method: "AS" (our proposed approach) or "QP" (standard QP)
-control_method = "AS"
+control_method = "QP"
 
 # Specify total simulation time in seconds
-sim_time = 3.5
+sim_time = 5.0
 
 # Specify whether to make plots at the end
-make_plots = True
+make_plots = False
 
 # Specify whether to include state estimation noise on floating base
 use_estimation_noise = False
@@ -123,14 +123,10 @@ assert plant.geometry_source_is_registered()
 
 if add_random_push:
     # Set up an external force
-    #np.random.seed(push_seed)
-    #time = np.random.uniform(low=1.0,high=3.5)
-    #magnitude = np.random.uniform(low=400,high=600)
-    #direction = np.random.choice([-1,1])
-
-    time = 2
-    magnitude = 800
-    direction = -1
+    np.random.seed(push_seed)
+    time = np.random.uniform(low=1.0,high=3.5)
+    magnitude = np.random.uniform(low=400,high=600)
+    direction = np.random.choice([-1,1])
 
     disturbance_sys = builder.AddSystem(DisturbanceSystem(plant,
                                                           "torso",                     # body to apply to
@@ -197,8 +193,7 @@ simulator.Initialize()
 try:
     simulator.AdvanceTo(sim_time)
 except:
-    print("Controller Error!")
-    #sys.exit(1)
+    sys.exit(1)
 
 
 if make_plots:
