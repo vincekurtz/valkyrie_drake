@@ -13,22 +13,22 @@ import sys
 ######################################################################
 
 # Specify whether the controller should assume an incorrect model
-use_incorrect_model = False
-model_num = 0    # incorrect model in [0,10] to use if use_incorrect_model is True
+use_incorrect_model = True
+model_num = sys.argv[1]    # incorrect model in [0,10] to use if use_incorrect_model is True
 
 # Specify whether to add a random lateral push
 add_random_push = False
 push_seed = None
 
 # Specify whether to add uneven terrain
-add_uneven_terrain = True
+add_uneven_terrain = False
 terrain_seed = None   # random seed used to generate uneven terrain
 
 # Specify control method: "AS" (our proposed approach) or "QP" (standard QP)
-control_method = "AS"
+control_method = "QP"
 
 # Specify total simulation time in seconds
-sim_time = 11.0
+sim_time = 5.0
 
 # Specify whether to make plots at the end
 make_plots = False

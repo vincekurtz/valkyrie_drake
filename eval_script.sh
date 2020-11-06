@@ -13,7 +13,7 @@ for i in $(seq 1 $TOTAL_TRIALS)
 do
     echo -n "Trial $i / $TOTAL_TRIALS: "
 
-    $(./simulate_valkyrie.py > /dev/null 2>&1)
+    $(./simulate_valkyrie.py $i > /dev/null 2>&1)
     return_code=$?
 
     if (($return_code == 0))
