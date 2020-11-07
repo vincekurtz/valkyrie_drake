@@ -17,18 +17,18 @@ use_incorrect_model = False
 model_num = sys.argv[1]    # incorrect model in [1,100] to use if use_incorrect_model is True
 
 # Specify whether to add a random lateral push
-add_random_push = True
+add_random_push = False
 push_seed = int(sys.argv[1])
 
 # Specify whether to add uneven terrain
-add_uneven_terrain = False
+add_uneven_terrain = True
 terrain_seed = int(sys.argv[1])   # random seed used to generate uneven terrain
 
 # Specify control method: "AS" (our proposed approach) or "QP" (standard QP)
 control_method = "QP"
 
 # Specify total simulation time in seconds
-sim_time = 5.0
+sim_time = 10.0
 
 # Specify whether to make plots at the end
 make_plots = False
